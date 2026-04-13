@@ -1,0 +1,76 @@
+Copyright (c) 2024-present Nima Shafie. All Rights Reserved.
+
+────────────────────────────────────────────────────────────────────────────────
+                        SOURCE-AVAILABLE LICENSE v1.0
+                         airgap-cpp-devkit / airgap-devkit-manager
+────────────────────────────────────────────────────────────────────────────────
+
+OWNERSHIP
+  This software and all associated documentation, assets, and configuration
+  files (collectively, the "Software") are the exclusive intellectual property
+  of Nima Shafie ("Author"). No transfer of ownership, copyright, or any other
+  intellectual property rights is granted by this license or by any use of the
+  Software.
+
+PERMITTED USES
+  Subject to the restrictions below, you are granted a limited, non-exclusive,
+  non-transferable, revocable license to:
+
+    1. View and study the source code for personal, educational, or internal
+       evaluation purposes.
+    2. Clone or fork the repository for personal, non-commercial use.
+    3. Deploy the Software within your organization solely for internal,
+       non-revenue-generating purposes, provided you retain all copyright
+       notices and this license in full.
+    4. Submit contributions (bug fixes, improvements) via pull request.
+       By submitting a contribution you irrevocably assign all rights in that
+       contribution to the Author.
+
+RESTRICTIONS
+  The following uses are expressly prohibited without prior written permission
+  from the Author:
+
+    1. Commercial use — selling, licensing, renting, or otherwise monetizing
+       the Software or any derivative thereof.
+    2. Distribution — redistributing the Software or any substantial portion
+       of it to third parties, whether for free or for compensation.
+    3. SaaS / hosted services — providing the Software or a derivative as a
+       managed service or hosted product accessible to external users.
+    4. White-labeling or rebranding — presenting the Software as your own
+       product or removing / altering copyright and attribution notices.
+    5. Patent claims — initiating patent litigation alleging that the Software
+       infringes any patent.
+
+FUTURE COMMERCIAL LICENSING
+  The Author expressly reserves the right to offer the Software under separate
+  commercial license terms at any time. Nothing in this license limits the
+  Author's ability to do so. If you are interested in a commercial license,
+  contact the Author directly.
+
+DISCLAIMER OF WARRANTIES
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+  FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT. THE AUTHOR DOES NOT
+  WARRANT THAT THE SOFTWARE WILL BE ERROR-FREE, SECURE, OR UNINTERRUPTED.
+
+LIMITATION OF LIABILITY
+  TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, IN NO EVENT SHALL THE
+  AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY,
+  OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+  SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+  INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+  CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+  ARISING OUT OF OR IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+  YOUR USE OF THIS SOFTWARE IS ENTIRELY AT YOUR OWN RISK.
+
+GOVERNING LAW
+  This license shall be governed by and construed in accordance with the laws
+  of the State of California, United States, without regard to its conflict-of-
+  law provisions. Any disputes shall be resolved in the courts of California.
+
+────────────────────────────────────────────────────────────────────────────────
+  For commercial licensing, partnership inquiries, or permissions beyond the
+  scope of this license, contact: github.com/NimaShafie
+────────────────────────────────────────────────────────────────────────────────
