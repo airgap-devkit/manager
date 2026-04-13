@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# DevKit local overrides (machine-specific, never commit)
+.devkit-prefix
+
+# Pre-downloaded wheels for air-gap (ship separately as a .zip)
+vendor/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.suo
+*.user

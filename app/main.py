@@ -28,8 +28,8 @@ from fastapi.templating import Jinja2Templates
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
-APP_DIR = Path(__file__).parent          # .../devkit-ui/app/
-REPO_ROOT = APP_DIR.parent.parent.parent  # app/ -> devkit-ui/ -> dev-tools/ -> repo root
+APP_DIR = Path(__file__).parent    # .../airgap-devkit-manager/app/
+REPO_ROOT = APP_DIR.parent.parent  # app/ -> airgap-devkit-manager/ -> repo root
 TEMPLATES_DIR = APP_DIR / "templates"
 STATIC_DIR = APP_DIR / "static"
 USER_PACKAGES_DIR = REPO_ROOT / "user-packages"
@@ -46,7 +46,7 @@ def _detect_os() -> str:
 OS = _detect_os()
 
 
-_PREFIX_OVERRIDE_FILE = REPO_ROOT / "dev-tools" / "devkit-ui" / ".devkit-prefix"
+_PREFIX_OVERRIDE_FILE = APP_DIR.parent / ".devkit-prefix"  # airgap-devkit-manager/.devkit-prefix
 
 
 def _detect_prefix() -> Path:
