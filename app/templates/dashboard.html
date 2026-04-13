@@ -1,0 +1,2344 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DevKit Manager</title>
+  <script src="/static/htmx.min.js"></script>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --bg2: #161b22;
+      --bg3: #21262d;
+      --border: #30363d;
+      --text: #e6edf3;
+      --text2: #8b949e;
+      --accent: #58a6ff;
+      --green: #3fb950;
+      --red: #f85149;
+      --yellow: #d29922;
+      --purple: #bc8cff;
+      --orange: #ffa657;
+      --radius: 8px;
+      --font: 'SF Mono', 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background:
+        radial-gradient(ellipse at 18% 0%,   rgba(88,166,255,0.10) 0%, transparent 42%),
+        radial-gradient(ellipse at 85% 90%,  rgba(63,185,80,0.07)  0%, transparent 40%),
+        radial-gradient(ellipse at 95% 5%,   rgba(188,140,255,0.05) 0%, transparent 35%),
+        #0d1117;
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 13px;
+      min-height: 100vh;
+    }
+
+    /* Layout */
+    .layout { display: grid; grid-template-columns: 255px 1fr; min-height: 100vh; }
+
+    /* Sidebar */
+    .sidebar {
+      background:
+        radial-gradient(ellipse at 50% 0%, rgba(88,166,255,0.08) 0%, transparent 55%),
+        linear-gradient(180deg, #161d2b 0%, #12171e 100%);
+      border-right: 1px solid var(--border);
+      padding: 0;
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      overflow-y: auto;
+    }
+    .sidebar-logo {
+      padding: 14px 18px 14px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 14px;
+      background: linear-gradient(135deg, rgba(88,166,255,0.10) 0%, transparent 70%);
+    }
+    .sidebar-logo h1 {
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--text);
+      letter-spacing: 0.3px;
+      margin-bottom: 3px;
+    }
+    .sidebar-logo .version {
+      font-size: 11px;
+      color: var(--text2);
+      margin-top: 2px;
+    }
+    .sidebar-logo .badge {
+      display: inline-block;
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 2px 8px;
+      font-size: 10px;
+      color: var(--accent);
+      margin-top: 8px;
+      letter-spacing: 0.3px;
+    }
+    .nav-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 16px;
+      cursor: pointer;
+      color: var(--text2);
+      text-decoration: none;
+      transition: all 0.1s;
+      font-size: 12px;
+    }
+    .nav-item:hover, .nav-item.active {
+      background: var(--bg3);
+      color: var(--text);
+    }
+    .nav-item .icon { width: 16px; text-align: center; }
+    .nav-section {
+      padding: 20px 16px 6px;
+      font-size: 10px;
+      color: var(--text2);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+    .sidebar-sep {
+      margin: 18px 10px 0;
+      border: none;
+      border-top: 1px solid var(--border);
+      opacity: 0.6;
+    }
+    .sidebar-stats {
+      margin: 0;
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    .stat-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 12px;
+      font-size: 11px;
+      color: var(--text2);
+      border-bottom: 1px solid var(--border);
+      transition: background 0.1s;
+    }
+    .stat-row:last-child { border-bottom: none; }
+    .stat-row .val { color: var(--text); font-weight: 600; font-size: 12px; }
+
+    /* Main content */
+    .main { padding: 24px; overflow-y: auto; }
+
+    /* Header */
+    .page-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 24px;
+      gap: 16px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--border);
+      background: linear-gradient(90deg, rgba(88,166,255,0.03) 0%, transparent 50%);
+      border-radius: var(--radius) var(--radius) 0 0;
+    }
+    .page-title { font-size: 20px; font-weight: 700; letter-spacing: -0.3px; }
+    .page-subtitle { font-size: 12px; color: var(--text2); margin-top: 3px; }
+    .header-actions { display: flex; gap: 8px; }
+
+    /* Buttons */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 12px;
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      background: var(--bg2);
+      color: var(--text);
+      cursor: pointer;
+      font-family: var(--font);
+      font-size: 12px;
+      transition: all 0.1s;
+      text-decoration: none;
+    }
+    .btn:hover { background: var(--bg3); border-color: var(--accent); }
+    .btn-primary { background: var(--accent); border-color: var(--accent); color: #0d1117; font-weight: 600; }
+    .btn-primary:hover { background: #79c0ff; border-color: #79c0ff; }
+    .btn-success { background: var(--green); border-color: var(--green); color: #0d1117; font-weight: 600; }
+    .btn-success:hover { opacity: 0.9; }
+    .btn-danger { background: var(--red); border-color: var(--red); color: #fff; }
+    .btn-sm { padding: 4px 8px; font-size: 11px; }
+
+    /* Source badges — repo (built-in) vs custom (user-uploaded) */
+    .badge-source-builtin {
+      display: inline-flex; align-items: center; gap: 4px;
+      font-size: 9px; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase;
+      padding: 2px 6px; border-radius: 4px;
+      color: var(--text2); background: var(--bg3); border: 1px solid var(--border);
+    }
+    .badge-source-user {
+      display: inline-flex; align-items: center; gap: 4px;
+      font-size: 9px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase;
+      padding: 2px 7px; border-radius: 4px;
+      color: var(--yellow); background: rgba(210,153,34,0.13); border: 1px solid rgba(210,153,34,0.5);
+    }
+
+    /* Add Package wizard steps */
+    .pkg-steps {
+      display: flex; align-items: center; gap: 8px;
+      padding: 10px 16px; border-bottom: 1px solid var(--border);
+      font-size: 12px; background: var(--bg2);
+    }
+    .pkg-step { display: flex; align-items: center; gap: 6px; color: var(--text2); font-weight: 500; }
+    .pkg-step.active { color: var(--text); }
+    .pkg-step-num {
+      width: 20px; height: 20px; border-radius: 50%;
+      background: var(--bg3); border: 1px solid var(--border);
+      display: inline-flex; align-items: center; justify-content: center; font-size: 10px;
+    }
+    .pkg-step.active .pkg-step-num { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .pkg-step-arrow { color: var(--border); }
+
+    /* Add Package form */
+    .pkg-form-row { margin-bottom: 12px; }
+    .pkg-form-label { display: block; font-size: 11px; color: var(--text2); margin-bottom: 4px; font-weight: 500; }
+    .pkg-form-input {
+      width: 100%; background: var(--bg3); border: 1px solid var(--border);
+      border-radius: 6px; padding: 7px 10px; color: var(--text);
+      font-family: var(--font); font-size: 12px; box-sizing: border-box;
+    }
+    .pkg-form-input:focus { outline: none; border-color: var(--accent); }
+    .pkg-form-note {
+      background: rgba(210,153,34,0.07); border: 1px solid rgba(210,153,34,0.28);
+      border-radius: 6px; padding: 8px 12px; margin-bottom: 12px; font-size: 12px; color: var(--text2);
+    }
+
+    /* Upload drop zone */
+    .upload-zone {
+      border: 2px dashed var(--border); border-radius: 8px;
+      padding: 32px 24px; text-align: center; cursor: pointer;
+      color: var(--text2); transition: all 0.15s;
+    }
+    .upload-zone:hover, .upload-zone.dragover {
+      border-color: var(--accent); color: var(--text); background: rgba(88,166,255,0.04);
+    }
+    .upload-zone input[type=file] { display: none; }
+
+    /* Progress bar */
+    .progress-bar {
+      height: 3px;
+      background: var(--bg3);
+      border-radius: 2px;
+      margin: 6px 0;
+      overflow: hidden;
+    }
+    .progress-bar-fill {
+      height: 100%;
+      background: var(--accent);
+      border-radius: 2px;
+      transition: width 0.3s;
+    }
+
+    /* Cards */
+    .card {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    .card-header {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .card-title { font-size: 13px; font-weight: 600; }
+    .card-body { padding: 16px; }
+
+    /* Status badges */
+    .badge-installed {
+      display: inline-flex; align-items: center; gap: 4px;
+      background: rgba(63,185,80,0.15); color: var(--green);
+      border: 1px solid rgba(63,185,80,0.3);
+      padding: 2px 7px; border-radius: 20px; font-size: 10px; font-weight: 600;
+    }
+    .badge-not-installed {
+      display: inline-flex; align-items: center; gap: 4px;
+      background: rgba(139,148,158,0.1); color: var(--text2);
+      border: 1px solid var(--border);
+      padding: 2px 7px; border-radius: 20px; font-size: 10px;
+    }
+    .badge-unavailable {
+      display: inline-flex; align-items: center; gap: 4px;
+      background: rgba(248,81,73,0.1); color: var(--red);
+      border: 1px solid rgba(248,81,73,0.3);
+      padding: 2px 7px; border-radius: 20px; font-size: 10px;
+    }
+    .badge-category {
+      background: var(--bg3); color: var(--text2);
+      border: 1px solid var(--border);
+      padding: 1px 6px; border-radius: 4px; font-size: 10px;
+    }
+    .dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
+    .dot-green { background: var(--green); }
+    .dot-gray  { background: var(--text2); }
+    .dot-red   { background: var(--red); }
+
+    /* Tool grid */
+    .tool-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+      gap: 14px;
+      margin-bottom: 24px;
+    }
+    .tool-card {
+      background: linear-gradient(145deg, var(--bg2) 0%, #13181f 100%);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 18px 20px;
+      transition: border-color 0.2s, transform 0.15s, box-shadow 0.15s;
+    }
+    .tool-card:hover {
+      border-color: var(--accent);
+      transform: translateY(-1px);
+      box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+    }
+    .tool-card.installed { border-left: 3px solid var(--green); }
+    .tool-card.not-available { opacity: 0.5; }
+    .tool-card-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      margin-bottom: 10px;
+    }
+    .tool-name { font-size: 15px; font-weight: 600; }
+    .tool-version { font-size: 11px; color: var(--text2); margin-top: 3px; }
+    .tool-desc { font-size: 12px; color: var(--text2); margin-bottom: 12px; line-height: 1.6; }
+    .tool-meta {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 10px;
+      flex-wrap: wrap;
+    }
+    .tool-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid var(--border);
+    }
+    .tool-date { font-size: 10px; color: var(--text2); }
+    .tool-actions { display: flex; gap: 6px; }
+
+    /* Profiles */
+    .profiles-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+    .profile-card {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .profile-card:hover { border-color: var(--accent); transform: translateY(-1px); }
+    .profile-name { font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+    .profile-desc { font-size: 11px; color: var(--text2); margin-bottom: 10px; }
+    .profile-tools { font-size: 10px; color: var(--text2); }
+    .profile-tools span {
+      display: inline-block;
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      padding: 1px 5px;
+      margin: 2px 2px 0 0;
+    }
+
+    /* Terminal / output */
+    .terminal {
+      background: #010409;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px;
+      font-family: var(--font);
+      font-size: 12px;
+      line-height: 1.6;
+      max-height: 400px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+    .terminal-line { display: block; }
+    .terminal-line.ok   { color: var(--green); }
+    .terminal-line.err  { color: var(--red); }
+    .terminal-line.info { color: var(--accent); }
+    .terminal-line.warn { color: var(--yellow); }
+
+    /* Modal */
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.7);
+      z-index: 1000;
+      align-items: center;
+      justify-content: center;
+    }
+    .modal-overlay.active { display: flex; }
+    .modal {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      width: 90%;
+      max-width: 640px;
+      max-height: 80vh;
+      display: flex;
+      flex-direction: column;
+    }
+    .modal-header {
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .modal-title { font-size: 14px; font-weight: 600; }
+    .modal-close {
+      background: none; border: none; color: var(--text2);
+      cursor: pointer; font-size: 18px; padding: 0 4px;
+    }
+    .modal-close:hover { color: var(--text); }
+    .modal-body { padding: 16px; overflow-y: auto; flex: 1; }
+    .modal-footer {
+      padding: 12px 16px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+    }
+
+    /* Section headers */
+    .section-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+    .section-title {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text2);
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+    }
+
+    /* Info grid */
+    .info-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+    .info-card {
+      background: linear-gradient(135deg, var(--bg2) 0%, var(--bg3) 100%);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 12px 14px;
+      transition: border-color 0.15s;
+    }
+    .info-card:hover { border-color: rgba(88,166,255,0.3); }
+    .info-label { font-size: 10px; color: var(--text2); text-transform: uppercase; letter-spacing: 0.5px; }
+    .info-value { font-size: 14px; font-weight: 600; margin-top: 4px; }
+    .info-value.green { color: var(--green); }
+    .info-value.accent { color: var(--accent); }
+
+    /* Universal copy-able code block */
+    .code-wrap { position: relative; }
+    .code-wrap .terminal { padding-right: 72px; }   /* room for 1 button */
+    .code-btn-group {
+      position: absolute; top: 6px; right: 8px;
+      display: flex; gap: 4px; align-items: flex-start; z-index: 1;
+    }
+    .copy-btn {
+      background: rgba(33,38,45,0.95); border: 1px solid var(--border);
+      color: var(--text2); cursor: pointer; font-size: 10px;
+      padding: 2px 8px; border-radius: 4px; font-family: var(--font);
+      transition: color 0.1s, border-color 0.1s; white-space: nowrap;
+    }
+    .copy-btn:hover { color: var(--text); border-color: var(--accent); }
+
+    /* Filter bar */
+    .filter-bar {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .filter-btn {
+      padding: 4px 10px;
+      border-radius: 20px;
+      border: 1px solid var(--border);
+      background: var(--bg2);
+      color: var(--text2);
+      cursor: pointer;
+      font-family: var(--font);
+      font-size: 11px;
+      transition: all 0.1s;
+    }
+    .filter-btn:hover, .filter-btn.active {
+      border-color: var(--accent);
+      color: var(--accent);
+      background: rgba(88,166,255,0.1);
+    }
+
+    /* Toast */
+    .toast-container {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      z-index: 2000;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .toast {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 10px 14px;
+      font-size: 12px;
+      min-width: 240px;
+      animation: slideIn 0.2s ease;
+    }
+    .toast.success { border-left: 3px solid var(--green); }
+    .toast.error   { border-left: 3px solid var(--red); }
+    @keyframes slideIn {
+      from { transform: translateX(100%); opacity: 0; }
+      to   { transform: translateX(0); opacity: 1; }
+    }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: var(--bg); }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--text2); }
+
+    /* Platform tag */
+    .platform-win  { color: var(--accent); }
+    .platform-linux { color: var(--green); }
+    .platform-both { color: var(--text2); }
+
+    /* Loading spinner */
+    .spinner {
+      display: inline-block;
+      width: 12px; height: 12px;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* HTMX indicators */
+    .htmx-indicator { display: none; }
+    .htmx-request .htmx-indicator { display: inline-block; }
+    .htmx-request.htmx-indicator { display: inline-block; }
+  </style>
+</head>
+<body>
+<div class="layout">
+
+  <!-- Sidebar -->
+  <nav class="sidebar">
+    <div class="sidebar-logo">
+      <h1>⚙ DevKit Manager</h1>
+      <div class="version">airgap-cpp-devkit</div>
+      <div class="version" style="margin-top:1px;color:var(--text2)">by Nima Shafie</div>
+      <div class="badge">{{ os | upper }} · {{ hostname }}</div>
+    </div>
+
+    <div class="nav-section">Navigation</div>
+    <a class="nav-item active" href="/">
+      <span class="icon">◈</span> Dashboard
+    </a>
+    <a class="nav-item" href="/logs">
+      <span class="icon">⊞</span> Logs
+    </a>
+
+    <div class="nav-section">Profiles</div>
+    {% for pid, profile in profiles.items() %}
+    <a class="nav-item" href="#" onclick="showProfileModal('{{ pid }}'); return false;">
+      <span class="icon">▷</span> {{ profile.name }}
+    </a>
+    {% endfor %}
+
+    <!-- Tool counts -->
+    <hr class="sidebar-sep">
+    <div style="padding: 14px 10px 0">
+      <div class="sidebar-stats">
+        <div class="stat-row">
+          <span>Installed</span>
+          <span class="val" style="color:var(--green)">{{ installed_count }} / {{ available_count }}</span>
+        </div>
+        <div class="stat-row">
+          <span>Available</span>
+          <span class="val" style="color:var(--accent)">{{ available_count }}</span>
+        </div>
+        <div class="stat-row">
+          <span>Total Tools</span>
+          <span class="val">{{ total_count }}</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Install Prefix -->
+    <hr class="sidebar-sep">
+    <div style="padding: 14px 10px 0;">
+      <div style="font-size:10px;color:var(--text2);margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;">
+        <span style="text-transform:uppercase;letter-spacing:1px">Install Prefix</span>
+        <button onclick="openPrefixEditor()" style="background:none;border:none;color:var(--accent);cursor:pointer;font-size:10px;padding:0;">✎ edit</button>
+      </div>
+      <div id="prefix-display" style="font-size:10px;color:var(--text);word-break:break-all;line-height:1.6;background:var(--bg3);border:1px solid var(--border);border-radius:4px;padding:7px 10px;">{{ prefix }}</div>
+    </div>
+
+    <!-- System info -->
+    <hr class="sidebar-sep">
+    <div style="padding:14px 10px 0">
+      <div style="font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">System</div>
+      <div class="sidebar-stats">
+        <div class="stat-row">
+          <span>Python</span>
+          <span class="val" style="color:var(--accent)">{{ system_info.python_version }}</span>
+        </div>
+        <div class="stat-row">
+          <span>Mode</span>
+          <span class="val" style="color:{% if system_info.privilege == 'admin' %}var(--yellow){% else %}var(--green){% endif %}">
+            {% if system_info.privilege == 'admin' %}⬆ Admin{% else %}⬇ User{% endif %}
+          </span>
+        </div>
+        {% if system_info.disk_free %}
+        <div class="stat-row">
+          <span>Disk free</span>
+          <span class="val">{{ system_info.disk_free }}</span>
+        </div>
+        <div class="stat-row">
+          <span>Disk total</span>
+          <span class="val">{{ system_info.disk_total }}</span>
+        </div>
+        {% endif %}
+      </div>
+      {% if system_info.privilege != 'admin' %}
+      <div style="font-size:10px;color:var(--text2);margin-top:10px;line-height:1.6;padding:0 2px">
+        For system-wide installs, run as
+        {% if os == 'windows' %}<span style="color:var(--text)">Administrator</span>
+        {% else %}<span style="color:var(--text)">root / sudo</span>{% endif %}.
+      </div>
+      <button onclick="openModal('admin-info-modal')"
+              style="margin:7px 2px 0;background:none;border:none;color:var(--accent);cursor:pointer;
+                     font-size:10px;padding:0;text-align:left;display:block;line-height:1.5"
+              title="How to run as administrator">ℹ How to run as admin →</button>
+      {% else %}
+      <div style="font-size:10px;color:var(--yellow);margin-top:10px;line-height:1.6;padding:0 2px">
+        ⬆ Running with elevated privileges — tools will install system-wide.
+      </div>
+      {% endif %}
+    </div>
+
+    <!-- Supported Platforms -->
+    <hr class="sidebar-sep">
+    <div style="padding:14px 10px 0">
+      <div style="font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">Supported Platforms</div>
+      <div class="sidebar-stats">
+        <div class="stat-row">
+          <span>Windows 11</span>
+          <span class="val" style="color:var(--accent);font-size:10px">Git Bash / MINGW64</span>
+        </div>
+        <div class="stat-row">
+          <span>RHEL 8</span>
+          <span class="val" style="color:var(--green);font-size:10px">Bash 4.x</span>
+        </div>
+      </div>
+      <div style="font-size:10px;color:var(--text2);margin-top:10px;line-height:1.9;padding:8px 10px;
+                  background:var(--bg3);border:1px solid var(--border);border-radius:6px">
+        <div>glibc ≥ 2.28 &nbsp;(Linux)</div>
+        <div>Python 3.8+ &nbsp;(for devkit-ui)</div>
+        <div>~2 GB disk &nbsp;(full install)</div>
+      </div>
+    </div>
+
+    <!-- Quick Actions -->
+    <hr class="sidebar-sep">
+    <div style="padding:14px 10px 22px">
+      <div style="font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px">Quick Actions</div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <button onclick="filterTools(document.querySelector('.filter-btn[onclick*=installed]'), 'installed')"
+                style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:9px 12px;
+                       color:var(--text2);cursor:pointer;font-family:var(--font);font-size:11px;text-align:left;
+                       transition:all 0.15s;display:flex;align-items:center;gap:8px"
+                onmouseenter="this.style.borderColor='var(--green)';this.style.color='var(--text)';this.style.background='rgba(63,185,80,0.06)'"
+                onmouseleave="this.style.borderColor='var(--border)';this.style.color='var(--text2)';this.style.background='var(--bg3)'">
+          <span style="color:var(--green)">●</span> Show installed only
+        </button>
+        <button onclick="filterTools(document.querySelector('.filter-btn'), 'all')"
+                style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:9px 12px;
+                       color:var(--text2);cursor:pointer;font-family:var(--font);font-size:11px;text-align:left;
+                       transition:all 0.15s;display:flex;align-items:center;gap:8px"
+                onmouseenter="this.style.borderColor='var(--accent)';this.style.color='var(--text)';this.style.background='rgba(88,166,255,0.06)'"
+                onmouseleave="this.style.borderColor='var(--border)';this.style.color='var(--text2)';this.style.background='var(--bg3)'">
+          <span style="color:var(--accent)">◈</span> Show all tools
+        </button>
+        <button onclick="showProfileModal('full')"
+                style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:9px 12px;
+                       color:var(--text2);cursor:pointer;font-family:var(--font);font-size:11px;text-align:left;
+                       transition:all 0.15s;display:flex;align-items:center;gap:8px"
+                onmouseenter="this.style.borderColor='var(--purple)';this.style.color='var(--text)';this.style.background='rgba(188,140,255,0.06)'"
+                onmouseleave="this.style.borderColor='var(--border)';this.style.color='var(--text2)';this.style.background='var(--bg3)'">
+          <span style="color:var(--purple)">▷</span> Full install profile
+        </button>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Main -->
+  <main class="main">
+    <div class="page-header">
+      <div style="flex-shrink:0">
+        <div class="page-title">Tool Dashboard</div>
+        <div class="page-subtitle">Manage your airgap-cpp-devkit installations · {{ total_count }} tools</div>
+      </div>
+
+      <!-- Category quick-jump -->
+      <div style="display:flex;align-items:center;gap:6px;flex:1;overflow-x:auto;justify-content:center;padding:0 8px">
+        {% set hcats = [] %}
+        {% for t in tools %}{% if t.category not in hcats %}{% set _ = hcats.append(t.category) %}{% endif %}{% endfor %}
+        {% for cat in hcats %}
+        {% set cat_installed = categories[cat] | selectattr('installed') | list | length %}
+        {% set cat_avail = categories[cat] | selectattr('available') | list | length %}
+        <button class="filter-btn" onclick="filterTools(this, '{{ cat }}')"
+                style="white-space:nowrap;display:flex;align-items:center;gap:5px">
+          <span>{{ cat }}</span>
+          <span style="font-size:9px;background:var(--bg3);border-radius:3px;padding:0 4px;border:1px solid var(--border)">
+            {{ cat_installed }}/{{ cat_avail }}
+          </span>
+        </button>
+        {% endfor %}
+      </div>
+
+      <div class="header-actions" style="flex-shrink:0">
+        <button class="btn" onclick="refreshAll()">↺ Refresh</button>
+        <button class="btn" onclick="runTests(false)" title="Run smoke tests">Run Tests</button>
+        <button class="btn" onclick="openModal('upload-modal')" title="Upload a custom tool package">⬆ Add Package</button>
+        <button class="btn btn-primary" onclick="showProfileModal('cpp-dev')">▷ Install Profile</button>
+      </div>
+    </div>
+
+    <!-- Stats + Submodule status -->
+    <div class="info-grid" style="grid-template-columns: 1fr 1fr 1fr; margin-bottom: 20px;">
+      <!-- Installation progress card -->
+      <div class="info-card" style="padding: 16px 18px;">
+        <div class="info-label" style="margin-bottom:6px">Installation Progress</div>
+        <div class="info-value green" style="font-size:22px;letter-spacing:-0.5px">{{ installed_count }}<span style="font-size:14px;font-weight:400;color:var(--text2)"> / {{ available_count }}</span></div>
+        <div style="font-size:10px;color:var(--text2);margin-top:4px">
+          {{ available_count }} available on {{ os | upper }}
+          {% if total_count > available_count %} · {{ total_count - available_count }} other platform{% endif %}
+        </div>
+        <div class="progress-bar" style="margin-top:10px;height:4px">
+          <div class="progress-bar-fill" style="width:{{ (installed_count / available_count * 100) | int if available_count > 0 else 0 }}%"></div>
+        </div>
+        <div style="font-size:10px;color:var(--text2);margin-top:5px;text-align:right">
+          {{ (installed_count / available_count * 100) | int if available_count > 0 else 0 }}% complete
+        </div>
+      </div>
+
+      <!-- Environment card -->
+      <div class="info-card" style="padding: 16px 18px;">
+        <div class="info-label" style="margin-bottom:6px">Environment</div>
+        <div class="info-value accent" style="font-size:18px;letter-spacing:1px">{{ os | upper }}</div>
+        <div style="font-size:11px;color:var(--text);margin-top:6px;font-weight:500">{{ hostname }}</div>
+        <div style="font-size:10px;color:var(--text2);margin-top:4px">Python {{ system_info.python_version }}</div>
+        <div style="font-size:10px;margin-top:4px">
+          <span style="color:{% if system_info.privilege == 'admin' %}var(--yellow){% else %}var(--green){% endif %}">
+            {% if system_info.privilege == 'admin' %}⬆ Admin (system-wide){% else %}⬇ User install{% endif %}
+          </span>
+        </div>
+      </div>
+
+      <!-- Prebuilt-binaries submodule card -->
+      <div class="info-card" id="submodule-card"
+           style="padding:16px 18px; border-color: {% if submodule.initialized %}{% if submodule.stale %}var(--yellow){% else %}var(--green){% endif %}{% else %}var(--yellow){% endif %}; cursor:pointer; transition: opacity 0.15s;"
+           onmouseenter="this.style.opacity='0.85'"
+           onmouseleave="this.style.opacity='1'"
+           onclick="showSubmoduleModal()">
+        <div class="info-label" style="margin-bottom:6px">Prebuilt-Binaries</div>
+        {% if submodule.initialized %}
+          {% if submodule.stale %}
+            <div class="info-value" style="color:var(--yellow);font-size:18px">⚠ Stale</div>
+            <div style="font-size:10px;color:var(--text2);margin-top:6px">Commit: {{ submodule.commit }}</div>
+            <div style="font-size:10px;color:var(--yellow);margin-top:3px">Run git pull to update</div>
+          {% else %}
+            <div class="info-value green" style="font-size:18px">✓ Ready</div>
+            <div style="font-size:10px;color:var(--text2);margin-top:6px">Commit: {{ submodule.commit if submodule.commit else 'checked out' }}</div>
+            <div style="font-size:10px;color:var(--text2);margin-top:3px">{{ submodule.prebuilt_tool_count }} tools use fast path</div>
+          {% endif %}
+        {% else %}
+          <div class="info-value" style="color:var(--yellow);font-size:18px">⚠ Not init</div>
+          <div style="font-size:10px;color:var(--text2);margin-top:6px">{{ submodule.prebuilt_tool_count }} tools affected</div>
+          <div style="font-size:10px;color:var(--accent);margin-top:3px">Click to initialise →</div>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- Filter bar -->
+    <div class="filter-bar">
+      <button class="filter-btn active" onclick="filterTools(this, 'all')">All</button>
+      <button class="filter-btn" onclick="filterTools(this, 'installed')">Installed</button>
+      <button class="filter-btn" onclick="filterTools(this, 'not-installed')">Not Installed</button>
+      {% set cats = [] %}
+      {% for t in tools %}{% if t.category not in cats %}{% set _ = cats.append(t.category) %}{% endif %}{% endfor %}
+      {% for cat in cats %}
+      <button class="filter-btn" onclick="filterTools(this, '{{ cat }}')">{{ cat }}</button>
+      {% endfor %}
+      <input id="search-input" type="text" placeholder="Search tools..."
+             oninput="searchTools(this.value)"
+             style="margin-left:auto;background:var(--bg2);border:1px solid var(--border);
+                    color:var(--text);padding:4px 10px;border-radius:20px;font-family:var(--font);
+                    font-size:11px;outline:none;width:160px;">
+    </div>
+
+    <!-- Tools by category -->
+    {% for category, cat_tools in categories.items() %}
+    <div class="section-header" style="margin-bottom:10px">
+      <div class="section-title">{{ category }}</div>
+      <div style="font-size:11px;color:var(--text2)">
+        {{ cat_tools | selectattr('installed') | list | length }} /
+        {{ cat_tools | selectattr('available') | list | length }} installed
+      </div>
+    </div>
+    <div class="tool-grid" style="margin-bottom:28px">
+      {% for tool in cat_tools %}
+      <div class="tool-card {% if tool.installed %}installed{% endif %} {% if not tool.available %}not-available{% endif %}"
+           data-category="{{ tool.category }}"
+           data-installed="{{ 'installed' if tool.installed else 'not-installed' }}"
+           id="tool-card-{{ tool.id | replace('/', '-') }}">
+        <div class="tool-card-header">
+          <div>
+            <div class="tool-name">{{ tool.name }}</div>
+            <div class="tool-version">
+              {% if tool.version_label is defined %}{{ tool.version_label }}
+              {% else %}v{{ tool.version }}{% endif %}
+            </div>
+          </div>
+          <div>
+            {% if not tool.available %}
+              <span class="badge-unavailable">
+                <span class="dot dot-red"></span>
+                {{ tool.platform }}-only
+              </span>
+            {% elif tool.installed %}
+              <span class="badge-installed">
+                <span class="dot dot-green"></span>
+                Installed
+              </span>
+            {% else %}
+              <span class="badge-not-installed">
+                <span class="dot dot-gray"></span>
+                Not installed
+              </span>
+            {% endif %}
+          </div>
+        </div>
+
+        <div class="tool-desc">{{ tool.description }}</div>
+
+        {% if tool.extensions is defined %}
+        <div style="margin-bottom:10px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+          {% set vendored = tool.extensions | selectattr('status', 'equalto', 'vendored') | list %}
+          {% set planned  = tool.extensions | selectattr('status', 'equalto', 'planned')  | list %}
+          {% if vendored %}<span class="badge-category" style="color:var(--green);border-color:rgba(63,185,80,0.3)">{{ vendored|length }} vendored</span>{% endif %}
+          {% if planned %}<span class="badge-category" style="color:var(--yellow);border-color:rgba(210,153,34,0.4)">{{ planned|length }} planned</span>{% endif %}
+          <button class="btn btn-sm" style="padding:2px 8px;font-size:10px"
+                  onclick="showSubItems('{{ tool.id }}', '{{ tool.name }}')">▾ View all</button>
+        </div>
+        {% endif %}
+
+        {% if tool.packages is defined %}
+        <div style="margin-bottom:10px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+          <span class="badge-category" style="color:var(--green);border-color:rgba(63,185,80,0.3)">{{ tool.packages|length }} packages</span>
+          <button class="btn btn-sm" style="padding:2px 8px;font-size:10px"
+                  onclick="showSubItems('{{ tool.id }}', '{{ tool.name }}')">▾ View all</button>
+        </div>
+        {% endif %}
+
+        <div class="tool-meta">
+          <span class="badge-category">{{ tool.category }}</span>
+          <span class="badge-category
+            {% if tool.platform == 'windows' %}platform-win
+            {% elif tool.platform == 'linux' %}platform-linux
+            {% else %}platform-both{% endif %}">
+            {% if tool.platform == 'both' %}Win + Linux
+            {% elif tool.platform == 'windows' %}Windows
+            {% else %}Linux{% endif %}
+          </span>
+          {% if tool.uses_prebuilt %}
+            {% if submodule.initialized %}
+              <span class="badge-category" style="color:var(--green);border-color:rgba(63,185,80,0.3)">⚡ prebuilt</span>
+              <span class="badge-category">{{ tool.estimate }}</span>
+            {% else %}
+              <span class="badge-category" style="color:var(--yellow);border-color:rgba(210,153,34,0.4)"
+                    title="prebuilt-binaries not initialised — will build from source">⚠ source build</span>
+            {% endif %}
+          {% else %}
+            <span class="badge-category">{{ tool.estimate }}</span>
+          {% endif %}
+          {% if tool.source == 'user' %}
+            <span class="badge-source-user" title="User-uploaded package">⬆ custom</span>
+          {% else %}
+            <span class="badge-source-builtin" title="Shipped with the repo">◈ repo</span>
+          {% endif %}
+        </div>
+
+        <div class="tool-footer">
+          <div class="tool-date">
+            {% if tool.installed and tool.receipt.date %}
+              {{ tool.receipt.date }}
+            {% elif tool.source == 'user' and tool.uploaded_at is defined and tool.uploaded_at %}
+              <span title="Upload date">⬆ {{ tool.uploaded_at_display or tool.uploaded_at[:10] }}</span>
+              {% if tool.uploaded_by is defined and tool.uploaded_by %}
+                <span style="color:var(--text2);margin-left:2px">by {{ tool.uploaded_by }}</span>
+              {% endif %}
+            {% elif tool.installed %}
+              Installed
+            {% else %}
+              —
+            {% endif %}
+          </div>
+          <div class="tool-actions">
+            {% if tool.available %}
+              {% if tool.installed %}
+                <button class="btn btn-sm" onclick="installTool('{{ tool.id }}', '{{ tool.name }}', true)">
+                  ↺ Rebuild
+                </button>
+                <button class="btn btn-sm btn-danger" onclick="confirmUninstall('{{ tool.id }}', '{{ tool.name }}')"
+                        title="Remove install directory">✕</button>
+              {% else %}
+                <button class="btn btn-sm btn-success" onclick="installTool('{{ tool.id }}', '{{ tool.name }}', false)">
+                  ↓ Install
+                </button>
+              {% endif %}
+              <button class="btn btn-sm" onclick="showReceipt('{{ tool.id }}', '{{ tool.name }}')">
+                ℹ
+              </button>
+            {% endif %}
+            {% if tool.source == 'user' %}
+              <button class="btn btn-sm" style="color:var(--red);border-color:rgba(248,81,73,0.4)"
+                      onclick="confirmRemovePackage('{{ tool.id }}', '{{ tool.name }}')"
+                      title="Remove this package from user-packages/">🗑</button>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% endfor %}
+
+    <!-- Profiles section -->
+    <div class="section-header">
+      <div class="section-title">Install Profiles</div>
+    </div>
+    <div class="profiles-grid">
+      {% for pid, profile in profiles.items() %}
+      <div class="profile-card" onclick="showProfileModal('{{ pid }}')">
+        <div class="profile-name">{{ profile.name }}</div>
+        <div class="profile-desc">{{ profile.description }}</div>
+        <div class="profile-tools">
+          {% for tid in profile.tools[:5] %}
+          <span>{{ tid.split('/')[-1] }}</span>
+          {% endfor %}
+          {% if profile.tools | length > 5 %}
+          <span>+{{ profile.tools | length - 5 }} more</span>
+          {% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+
+  </main>
+</div>
+
+<!-- Install Modal -->
+<div class="modal-overlay" id="install-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title" id="install-modal-title">Installing...</div>
+      <button class="modal-close" onclick="closeModal('install-modal')">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="terminal" id="install-output">Waiting...</div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" id="install-close-btn" onclick="closeModal('install-modal'); refreshAll()">Close & Refresh</button>
+    </div>
+  </div>
+</div>
+
+<!-- Receipt Modal -->
+<div class="modal-overlay" id="receipt-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title" id="receipt-modal-title">Tool Info</div>
+      <button class="modal-close" onclick="closeModal('receipt-modal')">×</button>
+    </div>
+    <div class="modal-body" id="receipt-modal-body">
+      <div class="terminal">Loading...</div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" id="receipt-delete-btn"    style="display:none;margin-right:auto;color:var(--red);border-color:rgba(248,81,73,0.4)">🗑 Remove Package</button>
+      <button class="btn btn-danger" id="receipt-uninstall-btn" style="display:none">✕ Uninstall</button>
+      <button class="btn" onclick="closeModal('receipt-modal')">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Profile Modal -->
+<div class="modal-overlay" id="profile-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title" id="profile-modal-title">Install Profile</div>
+      <button class="modal-close" onclick="closeModal('profile-modal')">×</button>
+    </div>
+    <div class="modal-body" id="profile-modal-body"></div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeModal('profile-modal')">Cancel</button>
+      <button class="btn btn-primary" id="profile-install-btn">▷ Install</button>
+    </div>
+  </div>
+</div>
+
+<!-- Submodule Modal -->
+<div class="modal-overlay" id="submodule-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title">prebuilt-binaries submodule</div>
+      <button class="modal-close" onclick="closeModal('submodule-modal')">×</button>
+    </div>
+    <div class="modal-body">
+      {% if submodule.initialized %}
+        <div class="info-grid" style="margin-bottom:16px">
+          <div class="info-card">
+            <div class="info-label">Status</div>
+            <div class="info-value {% if submodule.stale %}" style="color:var(--yellow){% else %}green{% endif %}">
+              {% if submodule.stale %}⚠ Stale{% else %}✓ Ready{% endif %}
+            </div>
+          </div>
+          <div class="info-card">
+            <div class="info-label">Commit</div>
+            <div class="info-value accent">{{ submodule.commit if submodule.commit else '—' }}</div>
+          </div>
+        </div>
+        <div style="font-size:11px;color:var(--text2);margin-bottom:12px">
+          Path: <span style="color:var(--text)">{{ submodule.path }}</span>
+        </div>
+        {% if submodule.stale %}
+          <div style="font-size:11px;color:var(--yellow);margin-bottom:12px">
+            The submodule pointer has changed. Run <code>git submodule update --remote prebuilt-binaries</code>
+            or use the button below to re-sync.
+          </div>
+          <button class="btn btn-primary" onclick="initSubmodule()">↺ Re-sync Submodule</button>
+        {% else %}
+          <div style="font-size:11px;color:var(--text2)">
+            All {{ submodule.prebuilt_tool_count }} tools that use prebuilt binaries will install via fast path.
+          </div>
+        {% endif %}
+      {% else %}
+        <div style="color:var(--yellow);font-size:12px;margin-bottom:14px">
+          ⚠ The <strong>prebuilt-binaries</strong> submodule is not initialised.
+        </div>
+        <div style="font-size:11px;color:var(--text2);line-height:1.7;margin-bottom:16px">
+          <strong>{{ submodule.prebuilt_tool_count }} tools</strong> use prebuilt binaries for fast, compiler-free installs.
+          Without the submodule they will fall back to building from vendored source archives, which takes significantly longer.<br><br>
+          Click <strong>Initialise</strong> to run:<br>
+          <div class="terminal" style="min-height:52px;margin-top:6px">git submodule update --init --recursive prebuilt-binaries</div>
+        </div>
+        <button class="btn btn-primary" onclick="initSubmodule()">⬇ Initialise Submodule</button>
+      {% endif %}
+      <div class="terminal" id="submodule-output" style="margin-top:14px;display:none"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeModal('submodule-modal')">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add Package Modal (2-step wizard) -->
+<div class="modal-overlay" id="upload-modal">
+  <div class="modal" style="max-width:520px">
+    <div class="modal-header">
+      <span class="modal-title">Add Package</span>
+      <button class="modal-close" onclick="_cancelUploadModal()">✕</button>
+    </div>
+
+    <!-- Step indicator -->
+    <div class="pkg-steps">
+      <div class="pkg-step active" id="pkg-step-ind-1">
+        <span class="pkg-step-num">1</span> Upload
+      </div>
+      <div class="pkg-step-arrow">→</div>
+      <div class="pkg-step" id="pkg-step-ind-2">
+        <span class="pkg-step-num">2</span> Details
+      </div>
+    </div>
+
+    <div class="modal-body">
+
+      <!-- Step 1: file drop -->
+      <div id="pkg-step1">
+        <p style="color:var(--text2);font-size:13px;margin:0 0 14px">
+          Drop any <code style="color:var(--accent)">.zip</code> of your tool files.
+          The wizard generates <code style="color:var(--accent)">devkit.json</code>,
+          <code style="color:var(--accent)">setup.sh</code>, and a checksum manifest automatically.
+        </p>
+        <div class="upload-zone" id="upload-zone"
+             onclick="document.getElementById('pkg-file').click()"
+             ondragover="event.preventDefault();this.classList.add('dragover')"
+             ondragleave="this.classList.remove('dragover')"
+             ondrop="event.preventDefault();this.classList.remove('dragover');_handlePkgDrop(event)">
+          <input type="file" id="pkg-file" accept=".zip" onchange="_handlePkgSelect(event)">
+          <div id="upload-zone-label">
+            <div style="font-size:28px;margin-bottom:8px">📦</div>
+            <div style="font-size:13px;font-weight:600;color:var(--text)">Drop .zip here or click to browse</div>
+            <div style="font-size:11px;margin-top:4px;color:var(--text2)">Any zip — no special structure required</div>
+          </div>
+        </div>
+        <div id="upload-preflight-status" style="margin-top:10px;font-size:12px;display:none"></div>
+      </div>
+
+      <!-- Step 2: metadata form -->
+      <div id="pkg-step2" style="display:none">
+        <div class="pkg-form-note" id="pkg-setup-note" style="display:none">
+          <span style="color:var(--yellow)">ℹ</span>
+          No <code>setup.sh</code> found — a template will be auto-generated.
+          You can customise it afterwards at
+          <code>user-packages/&lt;id&gt;/setup.sh</code>.
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px" class="pkg-form-row">
+          <div>
+            <label class="pkg-form-label">Name *</label>
+            <input class="pkg-form-input" id="pkg-name" type="text" placeholder="My Tool" oninput="_pkgAutoId()">
+          </div>
+          <div>
+            <label class="pkg-form-label">Version *</label>
+            <input class="pkg-form-input" id="pkg-version" type="text" placeholder="1.0.0">
+          </div>
+        </div>
+        <div class="pkg-form-row">
+          <label class="pkg-form-label">Package ID *
+            <span style="font-weight:400"> — unique slug, lowercase, hyphens only</span>
+          </label>
+          <input class="pkg-form-input" id="pkg-id" type="text" placeholder="my-tool">
+        </div>
+        <div class="pkg-form-row">
+          <label class="pkg-form-label">Description *</label>
+          <input class="pkg-form-input" id="pkg-desc" type="text" placeholder="One-sentence description of what this tool does">
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px" class="pkg-form-row">
+          <div>
+            <label class="pkg-form-label">Category *</label>
+            <select class="pkg-form-input" id="pkg-category">
+              <option>Developer Tools</option>
+              <option>Toolchains</option>
+              <option>Build Tools</option>
+              <option>Languages</option>
+              <option>Frameworks</option>
+              <option>Plugins</option>
+            </select>
+          </div>
+          <div>
+            <label class="pkg-form-label">Platform *</label>
+            <select class="pkg-form-input" id="pkg-platform">
+              <option value="both">Both (Windows + Linux)</option>
+              <option value="windows">Windows only</option>
+              <option value="linux">Linux only</option>
+            </select>
+          </div>
+        </div>
+        <div class="pkg-form-row">
+          <label class="pkg-form-label">Est. install time
+            <span style="font-weight:400"> — e.g. ~30s, ~5min (optional)</span>
+          </label>
+          <input class="pkg-form-input" id="pkg-estimate" type="text" placeholder="~30s">
+        </div>
+        <div id="pkg-finalize-status" style="margin-top:8px;font-size:12px;display:none"></div>
+      </div>
+
+    </div><!-- modal-body -->
+
+    <div class="modal-footer">
+      <div id="pkg-footer-1" style="display:flex;gap:8px;width:100%;justify-content:flex-end">
+        <button class="btn" onclick="_cancelUploadModal()">Cancel</button>
+        <button class="btn btn-primary" id="pkg-next-btn" onclick="_showPkgStep2()" disabled>Next →</button>
+      </div>
+      <div id="pkg-footer-2" style="display:none;gap:8px;width:100%;justify-content:flex-end">
+        <button class="btn" onclick="_showPkgStep1Back()">← Back</button>
+        <button class="btn" onclick="_cancelUploadModal()">Cancel</button>
+        <button class="btn btn-primary" id="pkg-create-btn" onclick="_finalizePkg()">Create Package</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Prefix Editor Modal -->
+<div class="modal-overlay" id="prefix-modal">
+  <div class="modal" style="max-width:500px">
+    <div class="modal-header">
+      <div class="modal-title">Install Prefix</div>
+      <button class="modal-close" onclick="closeModal('prefix-modal')">×</button>
+    </div>
+    <div class="modal-body">
+      <div style="font-size:11px;color:var(--text2);margin-bottom:12px;line-height:1.6">
+        All tools install into subdirectories of this path.<br>
+        Leave blank to revert to auto-detected default.
+      </div>
+      <div style="margin-bottom:10px">
+        <div style="font-size:10px;color:var(--text2);margin-bottom:4px">Current prefix</div>
+        <input id="prefix-input" type="text" value="{{ prefix }}"
+               style="width:100%;background:var(--bg3);border:1px solid var(--border);color:var(--text);
+                      padding:7px 10px;border-radius:var(--radius);font-family:var(--font);font-size:12px;outline:none;">
+      </div>
+      <div style="font-size:10px;color:var(--text2)">
+        Defaults — Windows: <code>%LOCALAPPDATA%\airgap-cpp-devkit</code><br>
+        &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Linux: <code>/opt/airgap-cpp-devkit</code> or <code>~/.local/share/airgap-cpp-devkit</code>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-danger" onclick="resetPrefix()">↺ Reset to default</button>
+      <button class="btn" onclick="closeModal('prefix-modal')">Cancel</button>
+      <button class="btn btn-primary" onclick="savePrefix()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Admin Info Modal -->
+<div class="modal-overlay" id="admin-info-modal">
+  <div class="modal" style="max-width:680px;max-height:92vh">
+    <div class="modal-header">
+      <div class="modal-title">Running as Administrator / Root</div>
+      <button class="modal-close" onclick="closeModal('admin-info-modal')">×</button>
+    </div>
+    <div class="modal-body">
+      <div style="font-size:12px;color:var(--text2);margin-bottom:20px;line-height:1.7">
+        By default DevKit installs tools into your user profile. To install system-wide (accessible to all users),
+        launch the devkit with elevated privileges. The install prefix switches automatically.
+      </div>
+
+      <div style="margin-bottom:24px">
+        <div style="font-size:13px;font-weight:600;color:var(--accent);margin-bottom:10px">Windows (Git Bash)</div>
+        <div style="font-size:12px;color:var(--text2);margin-bottom:10px;line-height:1.8">
+          <strong style="color:var(--text)">Option A</strong> — Right-click <strong>Git Bash</strong> in the Start Menu
+          → <strong>Run as administrator</strong>, then navigate and launch:
+        </div>
+        <div style="position:relative">
+          <div class="terminal" id="admin-win-cmd1">cd /c/path/to/airgap-cpp-devkit
+bash launch.sh</div>
+          <button onclick="copyBlock('admin-win-cmd1')"
+                  style="position:absolute;top:6px;right:8px;background:var(--bg3);border:1px solid var(--border);
+                         color:var(--text2);cursor:pointer;font-size:10px;padding:2px 8px;border-radius:4px;
+                         font-family:var(--font)">⎘ Copy</button>
+        </div>
+        <div style="font-size:12px;color:var(--text2);margin-top:12px;margin-bottom:10px;line-height:1.8">
+          <strong style="color:var(--text)">Option B</strong> — Right-click <code style="color:var(--accent)">launch.sh</code>
+          → <strong>Open with Git Bash</strong>, then accept the UAC prompt.
+        </div>
+        <div style="font-size:11px;color:var(--text2);padding:8px 12px;background:var(--bg3);border-radius:6px;border:1px solid var(--border)">
+          ✓ Tools install to <code style="color:var(--text)">C:\Program Files\airgap-cpp-devkit\</code>
+        </div>
+      </div>
+
+      <div>
+        <div style="font-size:13px;font-weight:600;color:var(--green);margin-bottom:10px">Linux (RHEL 8 / sudo)</div>
+        <div style="font-size:12px;color:var(--text2);margin-bottom:10px;line-height:1.8">
+          <strong style="color:var(--text)">Option A</strong> — Prefix with <code style="color:var(--accent)">sudo</code>:
+        </div>
+        <div style="position:relative">
+          <div class="terminal" id="admin-linux-cmd1">sudo bash launch.sh</div>
+          <button onclick="copyBlock('admin-linux-cmd1')"
+                  style="position:absolute;top:6px;right:8px;background:var(--bg3);border:1px solid var(--border);
+                         color:var(--text2);cursor:pointer;font-size:10px;padding:2px 8px;border-radius:4px;
+                         font-family:var(--font)">⎘ Copy</button>
+        </div>
+        <div style="font-size:12px;color:var(--text2);margin-top:12px;margin-bottom:10px;line-height:1.8">
+          <strong style="color:var(--text)">Option B</strong> — Switch to root first:
+        </div>
+        <div style="position:relative">
+          <div class="terminal" id="admin-linux-cmd2">sudo su -
+cd /path/to/airgap-cpp-devkit
+bash launch.sh</div>
+          <button onclick="copyBlock('admin-linux-cmd2')"
+                  style="position:absolute;top:6px;right:8px;background:var(--bg3);border:1px solid var(--border);
+                         color:var(--text2);cursor:pointer;font-size:10px;padding:2px 8px;border-radius:4px;
+                         font-family:var(--font)">⎘ Copy</button>
+        </div>
+        <div style="font-size:11px;color:var(--text2);margin-top:12px;padding:8px 12px;background:var(--bg3);border-radius:6px;border:1px solid var(--border)">
+          ✓ Tools install to <code style="color:var(--text)">/opt/airgap-cpp-devkit/</code>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeModal('admin-info-modal')">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Sub-items Modal (extensions / packages) -->
+<div class="modal-overlay" id="subitems-modal">
+  <div class="modal" style="max-width:700px">
+    <div class="modal-header">
+      <div class="modal-title" id="subitems-modal-title">Items</div>
+      <button class="modal-close" onclick="closeModal('subitems-modal')">×</button>
+    </div>
+    <div class="modal-body" id="subitems-modal-body"></div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeModal('subitems-modal')">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast container -->
+<div class="toast-container" id="toast-container"></div>
+
+<script>
+  // ---------------------------------------------------------------------------
+  // Filtering
+  // ---------------------------------------------------------------------------
+  function filterTools(btn, filter) {
+    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    document.querySelectorAll('.tool-card').forEach(card => {
+      let show = false;
+      if (filter === 'all') show = true;
+      else if (filter === 'installed') show = card.dataset.installed === 'installed';
+      else if (filter === 'not-installed') show = card.dataset.installed === 'not-installed';
+      else show = card.dataset.category === filter;
+      card.style.display = show ? '' : 'none';
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Modal helpers
+  // ---------------------------------------------------------------------------
+  function openModal(id) {
+    document.getElementById(id).classList.add('active');
+  }
+  function closeModal(id) {
+    document.getElementById(id).classList.remove('active');
+  }
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') document.querySelectorAll('.modal-overlay.active').forEach(m => m.classList.remove('active'));
+  });
+
+  // ---------------------------------------------------------------------------
+  // Install tool
+  // ---------------------------------------------------------------------------
+  function installTool(toolId, toolName, rebuild) {
+    document.getElementById('install-modal-title').textContent = (rebuild ? 'Rebuilding: ' : 'Installing: ') + toolName;
+    const output = document.getElementById('install-output');
+    output.textContent = '';
+    openModal('install-modal');
+
+    const url = `/install/${toolId}${rebuild ? '?rebuild=true' : ''}`;
+    const evtSource = new EventSource(url);
+
+    evtSource.onmessage = function(e) {
+      const line = e.data;
+      if (line.startsWith('DONE:')) {
+        evtSource.close();
+        const success = line === 'DONE:success';
+        showToast(success ? '✓ ' + toolName + ' installed' : '✗ ' + toolName + ' failed', success ? 'success' : 'error');
+        return;
+      }
+      const span = document.createElement('span');
+      span.className = 'terminal-line';
+      if (line.includes('[OK]') || line.includes('SUCCESS') || line.startsWith('✓')) span.classList.add('ok');
+      else if (line.includes('[!!]') || line.includes('ERROR') || line.includes('FAIL') || line.startsWith('✗')) span.classList.add('err');
+      else if (line.includes('[--]') || line.includes('Skipped') || line.includes('SKIP')) span.classList.add('warn');
+      else if (line.includes('[install-mode]') || line.includes('Logging')) span.classList.add('info');
+      span.textContent = line;
+      output.appendChild(span);
+      output.appendChild(document.createTextNode('\n'));
+      output.scrollTop = output.scrollHeight;
+    };
+    evtSource.onerror = function() {
+      evtSource.close();
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Show receipt
+  // ---------------------------------------------------------------------------
+  async function showReceipt(toolId, toolName) {
+    document.getElementById('receipt-modal-title').textContent = toolName + ' — Info';
+    const body = document.getElementById('receipt-modal-body');
+    openModal('receipt-modal');
+
+    const resp = await fetch(`/api/tool/${toolId}`);
+    const data = await resp.json();
+    const r = data.receipt;
+
+    const platformLabel = data.platform === 'both' ? 'Windows + Linux' : data.platform === 'windows' ? 'Windows' : 'Linux';
+    const prebuiltLabel = data.uses_prebuilt
+      ? '<span style="color:var(--green)">⚡ prebuilt binary</span>'
+      : '<span style="color:var(--yellow)">⚙ source build</span>';
+
+    // ── Source badge HTML ──────────────────────────────────────────────────────
+    const isUser = data.source === 'user';
+    const sourceBadge = isUser
+      ? `<span style="display:inline-flex;align-items:center;gap:4px;font-size:10px;padding:2px 7px;border-radius:4px;background:rgba(210,153,34,0.12);border:1px solid rgba(210,153,34,0.35);color:var(--yellow)">⬆ custom package</span>`
+      : `<span style="display:inline-flex;align-items:center;gap:4px;font-size:10px;padding:2px 7px;border-radius:4px;background:rgba(88,166,255,0.08);border:1px solid rgba(88,166,255,0.25);color:var(--text2)">◈ built-in</span>`;
+
+    body.innerHTML = `
+      <div style="font-size:12px;color:var(--text2);line-height:1.6;margin-bottom:12px">${data.description}</div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px">
+        <div class="info-card">
+          <div class="info-label">Status</div>
+          <div class="info-value ${r.status === 'success' ? 'green' : ''}" style="${!r.receipt_exists ? 'color:var(--text2)' : ''}">
+            ${r.status === 'success' ? '✓ Installed' : r.receipt_exists ? '— Not installed' : '— Unknown'}
+          </div>
+          ${!r.receipt_exists ? `<div style="font-size:10px;color:var(--text2);margin-top:4px">No receipt found</div>` : ''}
+        </div>
+        <div class="info-card">
+          <div class="info-label">Version</div>
+          <div class="info-value accent">${data.version_label || data.version}</div>
+        </div>
+        <div class="info-card">
+          <div class="info-label">Est. time</div>
+          <div class="info-value">${data.estimate}</div>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
+        <div class="info-card">
+          <div class="info-label">Category</div>
+          <div style="font-size:12px;margin-top:4px">${data.category}</div>
+        </div>
+        <div class="info-card">
+          <div class="info-label">Platform</div>
+          <div style="font-size:12px;margin-top:4px">${platformLabel}</div>
+        </div>
+      </div>
+
+      <div style="margin-bottom:12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <span style="color:var(--text2);font-size:11px">Install type:</span>
+        <span style="font-size:11px">${prebuiltLabel}</span>
+        <span style="color:var(--text2);font-size:11px;margin-left:4px">Source:</span>
+        ${sourceBadge}
+      </div>
+
+      ${isUser ? `
+      <div style="border-top:1px solid var(--border);padding-top:10px;margin-top:10px">
+        <div style="font-size:11px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">Package Origin</div>
+        ${data.uploaded_by ? `<div style="font-size:11px;margin-bottom:4px"><span style="color:var(--text2)">Uploaded by:</span> <span style="color:var(--text)">${data.uploaded_by}</span></div>` : ''}
+        ${data.uploaded_at ? `<div style="font-size:11px;margin-bottom:4px"><span style="color:var(--text2)">Upload date:</span> <span style="color:var(--text)">${_fmtDate(data.uploaded_at)}</span></div>` : ''}
+      </div>` : ''}
+
+      ${r.status === 'success' ? `
+      <div style="border-top:1px solid var(--border);padding-top:10px;margin-top:10px">
+        <div style="font-size:11px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">Installation Details</div>
+        ${r.date ? `<div style="margin-bottom:5px;font-size:11px"><span style="color:var(--text2)">Date:</span> <span>${r.date}</span></div>` : ''}
+        ${r.install_path ? `<div style="margin-bottom:5px;font-size:11px"><span style="color:var(--text2)">Install path:</span><br><span style="word-break:break-all;color:var(--accent)">${r.install_path}</span></div>` : ''}
+        ${r.user ? `<div style="margin-bottom:5px;font-size:11px"><span style="color:var(--text2)">Installed by:</span> <span>${r.user}@${r.hostname}</span></div>` : ''}
+        ${r.log_file ? `<div style="margin-bottom:5px;font-size:11px"><span style="color:var(--text2)">Log file:</span><br><span style="word-break:break-all">${r.log_file}</span></div>` : ''}
+      </div>` : ''}
+
+      <div style="border-top:1px solid var(--border);padding-top:10px;margin-top:10px">
+        <div style="color:var(--text2);font-size:11px;margin-bottom:4px">Setup script:</div>
+        <div class="code-wrap">
+          <div class="terminal" style="min-height:auto;padding:8px 12px;padding-right:132px;word-break:break-all">${data.setup_abs || data.setup}</div>
+          <div class="code-btn-group">
+            <button class="copy-btn" style="color:var(--green);border-color:rgba(63,185,80,0.35)"
+                    data-action="run-tool" data-tool-id="${data.id}" data-tool-name="${data.name.replace(/"/g,'&quot;')}">▶ Run</button>
+            <button class="copy-btn" data-action="copy-sibling">⎘ Copy</button>
+          </div>
+        </div>
+        <div style="color:var(--text2);font-size:11px;margin-top:10px;margin-bottom:4px">Install log:</div>
+        <div class="code-wrap">
+          <div class="terminal" style="min-height:auto;padding:8px 12px;padding-right:132px;word-break:break-all">${data.receipt_path}</div>
+          <div class="code-btn-group">
+            <button class="copy-btn" style="color:var(--accent);border-color:rgba(88,166,255,0.3)"
+                    data-action="open-file" data-file-path="${data.receipt_path.replace(/"/g,'&quot;')}">⊞ Open</button>
+            <button class="copy-btn" data-action="copy-sibling">⎘ Copy</button>
+          </div>
+        </div>
+      </div>
+    `;
+
+    // Checksums section — only render when there is actual content
+    if (data.manifest) {
+      const m = data.manifest;
+      const hasZip   = !!m.zip_sha256;
+      const hasFiles = m.files && m.files.length > 0;
+      if (hasZip || hasFiles) {
+        let mHtml = `<div style="border-top:1px solid var(--border);padding-top:10px;margin-top:10px">
+          <div style="font-size:11px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px">Checksums</div>`;
+        if (hasZip) {
+          mHtml += `<div style="margin-bottom:10px">
+            <div style="color:var(--text2);font-size:11px;margin-bottom:4px">Package zip SHA256:</div>
+            <div class="terminal" style="min-height:auto;padding:8px 12px;word-break:break-all;font-size:10px">${m.zip_sha256}</div>
+          </div>`;
+        }
+        if (hasFiles) {
+          mHtml += m.files.map(f => `<div style="margin-bottom:10px">
+            <div style="color:var(--text2);font-size:11px;margin-bottom:4px">${f.path}</div>
+            <div class="terminal" style="min-height:auto;padding:8px 12px;word-break:break-all;font-size:10px">${f.sha256}</div>
+          </div>`).join('');
+        }
+        mHtml += `</div>`;
+        body.innerHTML += mHtml;
+      }
+    }
+
+    // Footer buttons — Uninstall (all installed tools) + Remove (user packages only)
+    const uninstallBtn = document.getElementById('receipt-uninstall-btn');
+    const deleteBtn    = document.getElementById('receipt-delete-btn');
+
+    if (data.installed) {
+      uninstallBtn.style.display = '';
+      uninstallBtn.onclick = () => { closeModal('receipt-modal'); confirmUninstall(data.id, data.name); };
+    } else {
+      uninstallBtn.style.display = 'none';
+    }
+
+    if (isUser) {
+      deleteBtn.style.display = '';
+      deleteBtn.onclick = () => { closeModal('receipt-modal'); confirmRemovePackage(data.id, data.name); };
+    } else {
+      deleteBtn.style.display = 'none';
+    }
+
+    // Append interactive sub-items table (extensions or packages) if present
+    if ((data.extensions && data.extensions.length) || (data.packages && data.packages.length)) {
+      // Fetch per-item install status
+      let stMap = {}, stAvail = true;
+      try {
+        const stResp = await fetch(`/api/subpkg-status?tool_id=${encodeURIComponent(data.id)}`);
+        const stData = await stResp.json();
+        stMap   = stData.status   || {};
+        stAvail = stData.available !== false;
+      } catch { /* show buttons anyway */ }
+
+      const tS   = `width:100%;border-collapse:collapse;font-size:12px`;
+      const thS  = `text-align:left;padding:7px 10px;font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid var(--border);background:var(--bg3)`;
+      const tdS  = `padding:8px 10px;border-bottom:1px solid var(--border);vertical-align:top`;
+      const tdRS = `padding:8px 10px;border-bottom:1px solid var(--border);text-align:right;white-space:nowrap;vertical-align:middle`;
+      const esc  = s => s.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+
+      function spActionBtn(id, displayName, installed) {
+        if (installed) {
+          return `<button class="btn btn-sm" style="color:var(--red);border-color:rgba(248,81,73,0.35);font-size:10px;padding:3px 8px"
+            onclick="_subpkgAction('${esc(data.id)}','${esc(id)}','${esc(displayName)}',true)">✕ Uninstall</button>`;
+        }
+        return `<button class="btn btn-sm btn-success" style="font-size:10px;padding:3px 8px"
+          onclick="_subpkgAction('${esc(data.id)}','${esc(id)}','${esc(displayName)}',false)">↓ Install</button>`;
+      }
+      if (data.extensions && data.extensions.length) {
+        const vendored = data.extensions.filter(e => e.status === 'vendored');
+        const planned  = data.extensions.filter(e => e.status === 'planned');
+        let tHtml = `<div style="border-top:1px solid var(--border);padding-top:14px;margin-top:14px">
+          <div style="font-size:11px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px">
+            Extensions (${vendored.length} vendored · ${planned.length} planned)
+          </div>
+          <table style="${tS}"><thead><tr>
+            <th style="${thS}">Extension</th>
+            <th style="${thS};text-align:right">Status / Action</th>
+          </tr></thead><tbody>`;
+        data.extensions.forEach(e => {
+          const inst = stMap[e.id] === true;
+          const vLabel = e.status === 'vendored'
+            ? `<span class="badge-category" style="color:var(--green);border-color:rgba(63,185,80,0.3)">v${e.version}</span>`
+            : `<span class="badge-category" style="color:var(--text2)">marketplace</span>`;
+          tHtml += `<tr>
+            <td style="${tdS}">
+              <div style="font-weight:600">${e.name}</div>
+              <div style="font-size:10px;color:var(--text2);margin-top:2px">${e.description}</div>
+              <div style="font-size:10px;color:var(--text2);margin-top:2px;opacity:0.6">${e.publisher} &nbsp;·&nbsp; ${vLabel}</div>
+            </td>
+            <td style="${tdRS}">
+              ${spActionBtn(e.id, e.name, inst)}
+            </td>
+          </tr>`;
+        });
+        tHtml += `</tbody></table></div>`;
+        body.innerHTML += tHtml;
+      }
+
+      if (data.packages && data.packages.length) {
+        let tHtml = `<div style="border-top:1px solid var(--border);padding-top:14px;margin-top:14px">
+          <div style="font-size:11px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px">
+            Pip Packages (${data.packages.length})
+          </div>
+          <table style="${tS}"><thead><tr>
+            <th style="${thS}">Package</th>
+            <th style="${thS};text-align:right">Status / Action</th>
+          </tr></thead><tbody>`;
+        data.packages.forEach(p => {
+          const inst = stMap[p.name] === true;
+          tHtml += `<tr>
+            <td style="${tdS}">
+              <div style="font-weight:600">${p.name}</div>
+              <div style="font-size:10px;color:var(--text2);margin-top:2px">${p.description}</div>
+              <div style="font-size:10px;color:var(--text2);margin-top:2px;opacity:0.6">${p.category} &nbsp;·&nbsp; <span class="badge-category">${p.version}</span></div>
+            </td>
+            <td style="${tdRS}">
+              ${spActionBtn(p.name, p.name, inst)}
+            </td>
+          </tr>`;
+        });
+        tHtml += `</tbody></table></div>`;
+        body.innerHTML += tHtml;
+      }
+    }
+
+    // Attach copy buttons to .terminal blocks that don't already have them
+    initCopyButtons(body);
+
+    // Wire up data-action buttons in the hand-built code-wrap blocks
+    body.querySelectorAll('[data-action]').forEach(btn => {
+      const action = btn.dataset.action;
+      if (action === 'copy-sibling') {
+        const terminal = btn.closest('.code-wrap').querySelector('.terminal');
+        btn.addEventListener('click', () => {
+          navigator.clipboard.writeText(terminal.textContent).then(() => {
+            btn.textContent = '✓ Copied';
+            btn.style.color = 'var(--green)';
+            setTimeout(() => { btn.textContent = '⎘ Copy'; btn.style.color = ''; }, 2000);
+          });
+        });
+      } else if (action === 'run-tool') {
+        btn.addEventListener('click', () => {
+          closeModal('receipt-modal');
+          installTool(btn.dataset.toolId, btn.dataset.toolName, false);
+        });
+      } else if (action === 'open-file') {
+        btn.addEventListener('click', () => _openFile(btn.dataset.filePath));
+      }
+    });
+  }
+
+  async function _openFile(path) {
+    try {
+      const r = await fetch('/open-file?path=' + encodeURIComponent(path));
+      const d = await r.json();
+      if (!r.ok) showToast(d.error || 'Cannot open file', 'error');
+    } catch (e) {
+      showToast(String(e), 'error');
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Profile modal
+  // ---------------------------------------------------------------------------
+  let _currentProfile = null;
+
+  function showProfileModal(profileId) {
+    _currentProfile = profileId;
+    const profiles = {{ profiles | tojson }};
+    const profile = profiles[profileId];
+    if (!profile) return;
+
+    document.getElementById('profile-modal-title').textContent = 'Profile: ' + profile.name;
+    document.getElementById('profile-modal-body').innerHTML = `
+      <p style="color:var(--text2);font-size:12px;margin-bottom:14px">${profile.description}</p>
+      <div style="color:var(--text2);font-size:11px;margin-bottom:8px">Tools included:</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px">
+        ${profile.tools.map(t => `<span class="badge-category" style="padding:3px 8px">${t}</span>`).join('')}
+      </div>
+      <div style="font-size:11px;color:var(--text2)">
+        Tools not available on this platform will be automatically skipped.
+      </div>
+    `;
+    document.getElementById('profile-install-btn').onclick = () => installProfile(profileId, profile.name);
+    openModal('profile-modal');
+  }
+
+  function installProfile(profileId, profileName) {
+    closeModal('profile-modal');
+    document.getElementById('install-modal-title').textContent = 'Installing Profile: ' + profileName;
+    const output = document.getElementById('install-output');
+    output.textContent = '';
+    openModal('install-modal');
+
+    const evtSource = new EventSource(`/install-profile/${profileId}`);
+    evtSource.onmessage = function(e) {
+      const line = e.data;
+      if (line.startsWith('DONE:')) {
+        evtSource.close();
+        showToast('✓ Profile ' + profileName + ' installed', 'success');
+        return;
+      }
+      const span = document.createElement('span');
+      span.className = 'terminal-line';
+      if (line.includes('[OK]') || line.includes('SUCCESS') || line.startsWith('✓')) span.classList.add('ok');
+      else if (line.includes('[!!]') || line.includes('ERROR') || line.includes('FAIL')) span.classList.add('err');
+      else if (line.includes('[--]') || line.includes('──')) span.classList.add('info');
+      span.textContent = line;
+      output.appendChild(span);
+      output.appendChild(document.createTextNode('\n'));
+      output.scrollTop = output.scrollHeight;
+    };
+    evtSource.onerror = () => evtSource.close();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Search
+  // ---------------------------------------------------------------------------
+  function searchTools(query) {
+    const q = query.toLowerCase().trim();
+    // Clear active filter btn highlight when searching
+    if (q) {
+      document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+    }
+    document.querySelectorAll('.tool-card').forEach(card => {
+      const name = card.querySelector('.tool-name')?.textContent.toLowerCase() || '';
+      const desc = card.querySelector('.tool-desc')?.textContent.toLowerCase() || '';
+      card.style.display = (!q || name.includes(q) || desc.includes(q)) ? '' : 'none';
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Submodule
+  // ---------------------------------------------------------------------------
+  function showSubmoduleModal() {
+    openModal('submodule-modal');
+    initCopyButtons(document.getElementById('submodule-modal'));
+  }
+
+  function initSubmodule() {
+    const output = document.getElementById('submodule-output');
+    output.textContent = '';
+    output.style.display = 'block';
+
+    const evtSource = new EventSource('/init-submodule', { method: undefined });
+    // EventSource is GET-only; use fetch+ReadableStream for POST
+    evtSource.close();
+
+    fetch('/init-submodule', { method: 'POST' }).then(resp => {
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      function read() {
+        reader.read().then(({ done, value }) => {
+          if (done) return;
+          const text = decoder.decode(value);
+          // Parse SSE lines
+          text.split('\n').forEach(line => {
+            if (!line.startsWith('data: ')) return;
+            const msg = line.slice(6);
+            if (msg.startsWith('DONE:')) {
+              const ok = msg === 'DONE:success';
+              showToast(ok ? '✓ Submodule initialised' : '✗ Submodule init failed', ok ? 'success' : 'error');
+              if (ok) setTimeout(() => window.location.reload(), 1500);
+              return;
+            }
+            const span = document.createElement('span');
+            span.className = 'terminal-line';
+            if (msg.startsWith('✓') || msg.includes('done')) span.classList.add('ok');
+            else if (msg.startsWith('✗') || msg.includes('ERROR')) span.classList.add('err');
+            span.textContent = msg;
+            output.appendChild(span);
+            output.appendChild(document.createTextNode('\n'));
+            output.scrollTop = output.scrollHeight;
+          });
+          read();
+        });
+      }
+      read();
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Run Tests
+  // ---------------------------------------------------------------------------
+  function runTests(verbose) {
+    document.getElementById('install-modal-title').textContent = 'Smoke Tests';
+    const output = document.getElementById('install-output');
+    output.textContent = '';
+    openModal('install-modal');
+
+    const url = `/run-tests${verbose ? '?verbose=true' : ''}`;
+    const evtSource = new EventSource(url);
+    evtSource.onmessage = function(e) {
+      const line = e.data;
+      if (line.startsWith('DONE:')) {
+        evtSource.close();
+        const ok = line === 'DONE:success';
+        showToast(ok ? '✓ All tests passed' : '✗ Some tests failed', ok ? 'success' : 'error');
+        return;
+      }
+      const span = document.createElement('span');
+      span.className = 'terminal-line';
+      if (line.includes('[OK]') || line.includes('passed') || line.startsWith('✓')) span.classList.add('ok');
+      else if (line.includes('[FAIL]') || line.includes('FAIL') || line.startsWith('✗')) span.classList.add('err');
+      else if (line.includes('[SKIP]')) span.classList.add('warn');
+      else if (line.includes('===') || line.includes('---')) span.classList.add('info');
+      span.textContent = line;
+      output.appendChild(span);
+      output.appendChild(document.createTextNode('\n'));
+      output.scrollTop = output.scrollHeight;
+    };
+    evtSource.onerror = () => evtSource.close();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Uninstall
+  // ---------------------------------------------------------------------------
+  function confirmUninstall(toolId, toolName) {
+    if (!confirm(`Remove ${toolName}?\n\nThis deletes the install directory from the prefix. You can reinstall at any time.`)) return;
+    document.getElementById('install-modal-title').textContent = 'Uninstalling: ' + toolName;
+    const output = document.getElementById('install-output');
+    output.textContent = '';
+    openModal('install-modal');
+
+    fetch(`/uninstall/${toolId}`, { method: 'DELETE' }).then(resp => {
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      function read() {
+        reader.read().then(({ done, value }) => {
+          if (done) return;
+          decoder.decode(value).split('\n').forEach(line => {
+            if (!line.startsWith('data: ')) return;
+            const msg = line.slice(6);
+            if (msg.startsWith('DONE:')) {
+              const ok = msg === 'DONE:success';
+              showToast(ok ? `✓ ${toolName} removed` : `✗ Uninstall failed`, ok ? 'success' : 'error');
+              return;
+            }
+            const span = document.createElement('span');
+            span.className = 'terminal-line' + (msg.startsWith('✓') ? ' ok' : msg.startsWith('✗') ? ' err' : '');
+            span.textContent = msg;
+            output.appendChild(span);
+            output.appendChild(document.createTextNode('\n'));
+            output.scrollTop = output.scrollHeight;
+          });
+          read();
+        });
+      }
+      read();
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Add Package — 2-step wizard (upload → metadata form → create)
+  // ---------------------------------------------------------------------------
+  let _pkgState = { file: null, stagingId: null, fileHashes: {}, zipSha256: '', hasSetupSh: false };
+
+  function _handlePkgSelect(evt) {
+    _pkgState.file = evt.target.files[0] || null;
+    _updateUploadZone();
+    if (_pkgState.file) _runPreflight();
+  }
+
+  function _handlePkgDrop(evt) {
+    _pkgState.file = evt.dataTransfer.files[0] || null;
+    _updateUploadZone();
+    if (_pkgState.file) _runPreflight();
+  }
+
+  function _updateUploadZone() {
+    const label = document.getElementById('upload-zone-label');
+    const status = document.getElementById('upload-preflight-status');
+    status.style.display = 'none';
+    document.getElementById('pkg-next-btn').disabled = true;
+    if (_pkgState.file) {
+      label.innerHTML = `<div style="font-size:20px;margin-bottom:6px">📦</div>
+        <div style="font-size:13px;font-weight:600;color:var(--text)">${_pkgState.file.name}</div>
+        <div style="font-size:11px;margin-top:2px;color:var(--text2)">${(_pkgState.file.size/1024).toFixed(1)} KB — click to change</div>`;
+    } else {
+      label.innerHTML = `<div style="font-size:28px;margin-bottom:8px">📦</div>
+        <div style="font-size:13px;font-weight:600;color:var(--text)">Drop .zip here or click to browse</div>
+        <div style="font-size:11px;margin-top:4px;color:var(--text2)">Any zip — no special structure required</div>`;
+    }
+  }
+
+  async function _runPreflight() {
+    const status = document.getElementById('upload-preflight-status');
+    status.style.display = 'block';
+    status.style.color = 'var(--text2)';
+    status.textContent = 'Analysing zip…';
+
+    const fd = new FormData();
+    fd.append('file', _pkgState.file);
+    try {
+      const r = await fetch('/packages/preflight', { method: 'POST', body: fd });
+      const data = await r.json();
+      if (!r.ok) {
+        status.style.color = 'var(--red)';
+        status.textContent = `✗ ${data.detail || data.error || 'Upload failed'}`;
+        return;
+      }
+      _pkgState.stagingId  = data.staging_id;
+      _pkgState.fileHashes = data.file_hashes || {};
+      _pkgState.zipSha256  = data.zip_sha256 || '';
+      _pkgState.hasSetupSh = data.has_setup_sh || false;
+
+      // Pre-fill form from detected fields
+      const d = data.detected || {};
+      if (d.name)        document.getElementById('pkg-name').value    = d.name;
+      if (d.version)     document.getElementById('pkg-version').value = d.version;
+      if (d.description) document.getElementById('pkg-desc').value    = d.description;
+      if (d.estimate)    document.getElementById('pkg-estimate').value = d.estimate;
+      if (d.category) {
+        const sel = document.getElementById('pkg-category');
+        for (const opt of sel.options) { if (opt.text === d.category) { sel.value = opt.value; break; } }
+      }
+      if (d.platform) document.getElementById('pkg-platform').value = d.platform;
+      if (d.id) {
+        document.getElementById('pkg-id').value = d.id;
+        document.getElementById('pkg-id').dataset.manualEdit = '1';
+      } else if (d.name) {
+        document.getElementById('pkg-id').value = _nameToSlug(d.name);
+      }
+
+      const n = (data.files || []).length;
+      status.style.color = 'var(--green)';
+      status.textContent = `✓ ${n} file${n !== 1 ? 's' : ''} found — click Next to fill in the details`;
+      document.getElementById('pkg-next-btn').disabled = false;
+
+    } catch (err) {
+      status.style.color = 'var(--red)';
+      status.textContent = `✗ ${err}`;
+    }
+  }
+
+  function _nameToSlug(name) {
+    return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  }
+
+  function _pkgAutoId() {
+    const idEl = document.getElementById('pkg-id');
+    if (!idEl.dataset.manualEdit) {
+      idEl.value = _nameToSlug(document.getElementById('pkg-name').value);
+    }
+  }
+
+  // Track manual edits to pkg-id so auto-fill stops
+  document.getElementById('pkg-id').addEventListener('input', function() {
+    this.dataset.manualEdit = '1';
+  });
+
+  function _showPkgStep2() {
+    document.getElementById('pkg-step1').style.display = 'none';
+    document.getElementById('pkg-step2').style.display = '';
+    document.getElementById('pkg-footer-1').style.display = 'none';
+    document.getElementById('pkg-footer-2').style.display = 'flex';
+    document.getElementById('pkg-step-ind-1').classList.remove('active');
+    document.getElementById('pkg-step-ind-2').classList.add('active');
+    document.getElementById('pkg-setup-note').style.display = _pkgState.hasSetupSh ? 'none' : '';
+  }
+
+  function _showPkgStep1Back() {
+    document.getElementById('pkg-step1').style.display = '';
+    document.getElementById('pkg-step2').style.display = 'none';
+    document.getElementById('pkg-footer-1').style.display = 'flex';
+    document.getElementById('pkg-footer-2').style.display = 'none';
+    document.getElementById('pkg-step-ind-1').classList.add('active');
+    document.getElementById('pkg-step-ind-2').classList.remove('active');
+    // Keep Next enabled — staging is still valid
+    document.getElementById('pkg-next-btn').disabled = !_pkgState.stagingId;
+  }
+
+  async function _finalizePkg() {
+    const name     = document.getElementById('pkg-name').value.trim();
+    const id       = document.getElementById('pkg-id').value.trim();
+    const version  = document.getElementById('pkg-version').value.trim();
+    const desc     = document.getElementById('pkg-desc').value.trim();
+    const category = document.getElementById('pkg-category').value;
+    const platform = document.getElementById('pkg-platform').value;
+    const estimate = document.getElementById('pkg-estimate').value.trim();
+
+    const fStatus  = document.getElementById('pkg-finalize-status');
+    const createBtn = document.getElementById('pkg-create-btn');
+
+    if (!name || !id || !version || !desc) {
+      fStatus.style.display = 'block';
+      fStatus.style.color = 'var(--red)';
+      fStatus.textContent = '✗ Name, ID, Version, and Description are required';
+      return;
+    }
+
+    createBtn.disabled = true;
+    createBtn.textContent = 'Creating…';
+    fStatus.style.display = 'block';
+    fStatus.style.color = 'var(--text2)';
+    fStatus.textContent = 'Creating package…';
+
+    try {
+      const r = await fetch('/packages/finalize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          staging_id: _pkgState.stagingId,
+          id, name, version, description: desc, category, platform,
+          estimate: estimate || '',
+          file_hashes: _pkgState.fileHashes,
+          zip_sha256: _pkgState.zipSha256,
+        }),
+      });
+      const data = await r.json();
+      if (r.ok && data.ok) {
+        showToast(`✓ "${data.name}" added`, 'success');
+        // staging already cleaned up by finalize; just reset + close
+        _pkgState.stagingId = null;
+        closeModal('upload-modal');
+        setTimeout(() => window.location.reload(), 300);
+      } else {
+        fStatus.style.color = 'var(--red)';
+        fStatus.textContent = `✗ ${data.detail || data.error || 'Failed'}`;
+        createBtn.disabled = false;
+        createBtn.textContent = 'Create Package';
+      }
+    } catch (err) {
+      fStatus.style.color = 'var(--red)';
+      fStatus.textContent = `✗ ${err}`;
+      createBtn.disabled = false;
+      createBtn.textContent = 'Create Package';
+    }
+  }
+
+  function _cancelUploadModal() {
+    if (_pkgState.stagingId) {
+      fetch(`/packages/staging/${_pkgState.stagingId}`, { method: 'DELETE' }).catch(() => {});
+    }
+    closeModal('upload-modal');
+  }
+
+  // Reset wizard state whenever the modal closes (Cancel, ✕, Escape, or after success)
+  const _origClose = window.closeModal;
+  window.closeModal = function(id) {
+    if (id === 'upload-modal') {
+      _pkgState = { file: null, stagingId: null, fileHashes: {}, zipSha256: '', hasSetupSh: false };
+      document.getElementById('pkg-file').value = '';
+      ['pkg-name','pkg-version','pkg-desc','pkg-estimate'].forEach(i => document.getElementById(i).value = '');
+      delete document.getElementById('pkg-id').dataset.manualEdit;
+      document.getElementById('pkg-id').value = '';
+      document.getElementById('pkg-finalize-status').style.display = 'none';
+      document.getElementById('upload-preflight-status').style.display = 'none';
+      document.getElementById('pkg-next-btn').disabled = true;
+      document.getElementById('pkg-create-btn').disabled = false;
+      document.getElementById('pkg-create-btn').textContent = 'Create Package';
+      // Reset to step 1 layout
+      document.getElementById('pkg-step1').style.display = '';
+      document.getElementById('pkg-step2').style.display = 'none';
+      document.getElementById('pkg-footer-1').style.display = 'flex';
+      document.getElementById('pkg-footer-2').style.display = 'none';
+      document.getElementById('pkg-step-ind-1').classList.add('active');
+      document.getElementById('pkg-step-ind-2').classList.remove('active');
+      _updateUploadZone();
+    }
+    _origClose(id);
+  };
+
+  // ---------------------------------------------------------------------------
+  // Remove Package (delete user-uploaded package definition)
+  // ---------------------------------------------------------------------------
+  function confirmRemovePackage(toolId, toolName) {
+    if (!confirm(`Remove package "${toolName}"?\n\nThis removes the tool definition from user-packages/.\nAny files already installed to the prefix are not affected.\nYou can re-add the package at any time.`)) return;
+    fetch(`/packages/${toolId}`, { method: 'DELETE' })
+      .then(r => r.json())
+      .then(data => {
+        if (data.ok) {
+          showToast(`✓ Package "${toolName}" removed`, 'success');
+          setTimeout(() => window.location.reload(), 500);
+        } else {
+          showToast(data.error || 'Remove failed', 'error');
+        }
+      });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Prefix editor
+  // ---------------------------------------------------------------------------
+  function openPrefixEditor() {
+    openModal('prefix-modal');
+  }
+
+  async function savePrefix() {
+    const val = document.getElementById('prefix-input').value.trim();
+    const resp = await fetch('/api/prefix', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prefix: val }),
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      document.getElementById('prefix-display').textContent = data.prefix;
+      closeModal('prefix-modal');
+      showToast('✓ Prefix updated — refresh to reload tool status', 'success');
+    } else {
+      showToast('✗ ' + (data.error || 'Failed'), 'error');
+    }
+  }
+
+  async function resetPrefix() {
+    const resp = await fetch('/api/prefix', { method: 'DELETE' });
+    const data = await resp.json();
+    if (data.ok) {
+      document.getElementById('prefix-input').value = data.prefix;
+      document.getElementById('prefix-display').textContent = data.prefix;
+      closeModal('prefix-modal');
+      showToast('✓ Prefix reset to default', 'success');
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Copy block (named id version — for admin modal static blocks)
+  // ---------------------------------------------------------------------------
+  function copyBlock(id) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    navigator.clipboard.writeText(el.textContent).then(() => {
+      const btn = el.parentElement.querySelector('button');
+      if (btn) {
+        const orig = btn.textContent;
+        btn.textContent = '✓ Copied';
+        btn.style.color = 'var(--green)';
+        setTimeout(() => { btn.textContent = orig; btn.style.color = ''; }, 2000);
+      }
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Universal copy buttons — wraps every .terminal that isn't already wrapped
+  // ---------------------------------------------------------------------------
+  function initCopyButtons(root) {
+    const scope = root || document;
+    scope.querySelectorAll('.terminal').forEach(el => {
+      if (el.closest('.code-wrap')) return; // already wrapped
+      const wrap = document.createElement('div');
+      wrap.className = 'code-wrap';
+      el.parentNode.insertBefore(wrap, el);
+      wrap.appendChild(el);
+      const group = document.createElement('div');
+      group.className = 'code-btn-group';
+      const btn = document.createElement('button');
+      btn.className = 'copy-btn';
+      btn.textContent = '⎘ Copy';
+      btn.addEventListener('click', () => {
+        navigator.clipboard.writeText(el.textContent).then(() => {
+          btn.textContent = '✓ Copied';
+          btn.style.color = 'var(--green)';
+          setTimeout(() => { btn.textContent = '⎘ Copy'; btn.style.color = ''; }, 2000);
+        });
+      });
+      group.appendChild(btn);
+      wrap.appendChild(group);
+    });
+  }
+  document.addEventListener('DOMContentLoaded', () => initCopyButtons());
+
+  // ---------------------------------------------------------------------------
+  // Sub-items (extensions / packages) — with per-item Install / Uninstall
+  // ---------------------------------------------------------------------------
+  async function showSubItems(toolId, toolName) {
+    document.getElementById('subitems-modal-title').textContent = toolName;
+    const body = document.getElementById('subitems-modal-body');
+    body.innerHTML = '<div style="color:var(--text2);font-size:12px">Loading...</div>';
+    openModal('subitems-modal');
+
+    // Fetch tool data + sub-pkg status in parallel
+    const [toolResp, stResp] = await Promise.all([
+      fetch(`/api/tool/${encodeURIComponent(toolId)}`),
+      fetch(`/api/subpkg-status?tool_id=${encodeURIComponent(toolId)}`),
+    ]);
+    const data   = await toolResp.json();
+    const stData = await stResp.json();
+    const stMap    = stData.status  || {};
+    const stAvail  = stData.available !== false;
+    const stErr    = stData.error   || null;
+
+    const tS   = `width:100%;border-collapse:collapse;font-size:12px`;
+    const thS  = `text-align:left;padding:6px 10px;font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid var(--border);background:var(--bg3)`;
+    const tdS  = `padding:8px 10px;border-bottom:1px solid var(--border);vertical-align:top`;
+    const tdRS = `padding:8px 10px;border-bottom:1px solid var(--border);text-align:right;white-space:nowrap;vertical-align:middle`;
+
+    // Escape single-quotes for inline onclick attrs
+    const esc = s => s.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+
+    // Render Install / Uninstall button — single button only, no badge
+    function actionBtn(id, displayName, installed) {
+      if (installed) {
+        return `<button class="btn btn-sm" style="color:var(--red);border-color:rgba(248,81,73,0.35);font-size:10px;padding:3px 8px"
+          onclick="_subpkgAction('${esc(toolId)}','${esc(id)}','${esc(displayName)}',true)">✕ Uninstall</button>`;
+      }
+      return `<button class="btn btn-sm btn-success" style="font-size:10px;padding:3px 8px"
+        onclick="_subpkgAction('${esc(toolId)}','${esc(id)}','${esc(displayName)}',false)">↓ Install</button>`;
+    }
+
+    let html = '';
+
+    if (!stAvail && stErr) {
+      html += `<div style="color:var(--yellow);font-size:12px;margin-bottom:14px;padding:9px 12px;
+        background:rgba(210,153,34,0.07);border:1px solid rgba(210,153,34,0.28);border-radius:6px">⚠ ${stErr}</div>`;
+    }
+
+    if (data.extensions) {
+      const vendored = data.extensions.filter(e => e.status === 'vendored');
+      const planned  = data.extensions.filter(e => e.status === 'planned');
+
+      if (vendored.length) {
+        html += `<div style="font-size:11px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">
+          Vendored — ${vendored.length} ready to install</div>`;
+        html += `<table style="${tS}"><thead><tr>
+          <th style="${thS}">Extension</th>
+          <th style="${thS};text-align:right">Status / Action</th>
+        </tr></thead><tbody>`;
+        html += vendored.map(e => {
+          const inst = stMap[e.id] === true;
+          return `<tr>
+            <td style="${tdS}">
+              <div style="font-weight:600">${e.name}</div>
+              <div style="font-size:10px;color:var(--text2);margin-top:2px">${e.description}</div>
+              <div style="font-size:10px;color:var(--text2);margin-top:2px;opacity:0.6">${e.id} &nbsp;·&nbsp; v${e.version} &nbsp;·&nbsp; ${e.publisher}</div>
+            </td>
+            <td style="${tdRS}">
+              ${actionBtn(e.id, e.name, inst)}
+            </td>
+          </tr>`;
+        }).join('');
+        html += `</tbody></table>`;
+      }
+
+      if (planned.length) {
+        html += `<div style="font-size:11px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:0.5px;margin:18px 0 8px">
+          Planned — ${planned.length} (no local .vsix · installs from marketplace)</div>`;
+        html += `<table style="${tS}"><thead><tr>
+          <th style="${thS}">Extension</th>
+          <th style="${thS};text-align:right">Status / Action</th>
+        </tr></thead><tbody>`;
+        html += planned.map(e => {
+          const inst = stMap[e.id] === true;
+          return `<tr>
+            <td style="${tdS}">
+              <div style="font-weight:600">${e.name}</div>
+              <div style="font-size:10px;color:var(--text2);margin-top:2px">${e.description}</div>
+              <div style="font-size:10px;color:var(--text2);margin-top:2px;opacity:0.6">${e.id} &nbsp;·&nbsp; ${e.publisher}</div>
+            </td>
+            <td style="${tdRS}">
+              ${actionBtn(e.id, e.name, inst)}
+            </td>
+          </tr>`;
+        }).join('');
+        html += `</tbody></table>`;
+      }
+
+    } else if (data.packages) {
+      html += `<table style="${tS}"><thead><tr>
+        <th style="${thS}">Package</th>
+        <th style="${thS};text-align:right">Status / Action</th>
+      </tr></thead><tbody>`;
+      html += data.packages.map(p => {
+        const inst = stMap[p.name] === true;
+        return `<tr>
+          <td style="${tdS}">
+            <div style="font-weight:600">${p.name}</div>
+            <div style="font-size:10px;color:var(--text2);margin-top:2px">${p.description}</div>
+            <div style="font-size:10px;color:var(--text2);margin-top:2px;opacity:0.6">${p.category} &nbsp;·&nbsp; <span class="badge-category">${p.version}</span></div>
+          </td>
+          <td style="${tdRS}">
+            ${actionBtn(p.name, p.name, inst)}
+          </td>
+        </tr>`;
+      }).join('');
+      html += `</tbody></table>`;
+
+    } else {
+      html = '<div style="color:var(--text2);font-size:12px">No sub-item data available.</div>';
+    }
+
+    body.innerHTML = html;
+    initCopyButtons(body);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Date formatting helper — any parseable date → YYYYMMDDHHmm
+  // ---------------------------------------------------------------------------
+  function _fmtDate(s) {
+    if (!s) return '';
+    // Already in target format MM/DD/YYYY HH:mm
+    if (/^\d{2}\/\d{2}\/\d{4} \d{2}:\d{2}$/.test(s)) return s;
+    try {
+      const d = new Date(s);
+      if (isNaN(d)) return s;
+      const M = String(d.getUTCMonth() + 1).padStart(2, '0');
+      const D = String(d.getUTCDate()).padStart(2, '0');
+      const Y = d.getUTCFullYear();
+      const h = String(d.getUTCHours()).padStart(2, '0');
+      const m = String(d.getUTCMinutes()).padStart(2, '0');
+      return `${M}/${D}/${Y} ${h}:${m}`;
+    } catch { return s; }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Sub-package action — SSE stream for install / uninstall of one item
+  // ---------------------------------------------------------------------------
+  function _subpkgAction(toolId, pkgId, displayName, uninstall) {
+    closeModal('subitems-modal');
+    document.getElementById('install-modal-title').textContent =
+      (uninstall ? 'Uninstalling: ' : 'Installing: ') + displayName;
+    const output = document.getElementById('install-output');
+    output.textContent = '';
+    openModal('install-modal');
+
+    const url = `/subpkg-install?tool_id=${encodeURIComponent(toolId)}&pkg_id=${encodeURIComponent(pkgId)}${uninstall ? '&uninstall=true' : ''}`;
+    const es = new EventSource(url);
+    es.onmessage = function(e) {
+      const line = e.data;
+      if (line.startsWith('DONE:')) {
+        es.close();
+        const ok = line === 'DONE:success';
+        showToast(
+          ok ? `✓ ${displayName} ${uninstall ? 'removed' : 'installed'}` : `✗ ${displayName} failed`,
+          ok ? 'success' : 'error'
+        );
+        return;
+      }
+      const span = document.createElement('span');
+      span.className = 'terminal-line';
+      if (line.startsWith('✓') || line.includes('[OK]')) span.classList.add('ok');
+      else if (line.startsWith('✗') || line.includes('ERROR') || line.includes('FAIL')) span.classList.add('err');
+      span.textContent = line;
+      output.appendChild(span);
+      output.appendChild(document.createTextNode('\n'));
+      output.scrollTop = output.scrollHeight;
+    };
+    es.onerror = () => es.close();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Refresh
+  // ---------------------------------------------------------------------------
+  function refreshAll() {
+    window.location.reload();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Toast
+  // ---------------------------------------------------------------------------
+  function showToast(msg, type) {
+    const container = document.getElementById('toast-container');
+    const toast = document.createElement('div');
+    toast.className = `toast ${type}`;
+    toast.textContent = msg;
+    container.appendChild(toast);
+    setTimeout(() => toast.remove(), 4000);
+  }
+</script>
+</body>
+</html>

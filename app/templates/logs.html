@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Logs — DevKit Manager</title>
+  <script src="/static/htmx.min.js"></script>
+  <style>
+    :root {
+      --bg: #0d1117; --bg2: #161b22; --bg3: #21262d;
+      --border: #30363d; --text: #e6edf3; --text2: #8b949e;
+      --accent: #58a6ff; --green: #3fb950; --red: #f85149;
+      --yellow: #d29922; --radius: 8px;
+      --font: 'SF Mono','Cascadia Code','Fira Code','Consolas',monospace;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: var(--bg); color: var(--text); font-family: var(--font); font-size: 13px; min-height: 100vh; }
+    .layout { display: grid; grid-template-columns: 220px 1fr; min-height: 100vh; }
+    .sidebar { background: var(--bg2); border-right: 1px solid var(--border); padding: 20px 0; position: sticky; top: 0; height: 100vh; overflow-y: auto; }
+    .sidebar-logo { padding: 0 16px 20px; border-bottom: 1px solid var(--border); margin-bottom: 12px; }
+    .sidebar-logo h1 { font-size: 14px; font-weight: 600; }
+    .sidebar-logo .version { font-size: 10px; color: var(--text2); margin-top: 2px; }
+    .nav-item { display: flex; align-items: center; gap: 8px; padding: 7px 16px; cursor: pointer; color: var(--text2); text-decoration: none; transition: all 0.1s; font-size: 12px; }
+    .nav-item:hover, .nav-item.active { background: var(--bg3); color: var(--text); }
+    .nav-section { padding: 12px 16px 4px; font-size: 10px; color: var(--text2); text-transform: uppercase; letter-spacing: 1px; }
+    .main { padding: 24px; }
+    .page-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; }
+    .page-title { font-size: 18px; font-weight: 600; }
+    .page-subtitle { font-size: 12px; color: var(--text2); margin-top: 2px; }
+    .btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--bg2); color: var(--text); cursor: pointer; font-family: var(--font); font-size: 12px; text-decoration: none; transition: all 0.1s; }
+    .btn:hover { background: var(--bg3); border-color: var(--accent); }
+    .btn-sm { padding: 4px 8px; font-size: 11px; }
+    .logs-layout { display: grid; grid-template-columns: 280px 1fr; gap: 16px; height: calc(100vh - 120px); }
+    .log-list { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); overflow-y: auto; }
+    .log-list-header { padding: 10px 12px; border-bottom: 1px solid var(--border); font-size: 11px; color: var(--text2); font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+    .log-item { padding: 10px 12px; border-bottom: 1px solid var(--border); cursor: pointer; transition: background 0.1s; }
+    .log-item:hover, .log-item.active { background: var(--bg3); }
+    .log-item-name { font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .log-item-meta { font-size: 10px; color: var(--text2); margin-top: 3px; display: flex; justify-content: space-between; }
+    .log-viewer { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); display: flex; flex-direction: column; }
+    .log-viewer-header { padding: 10px 14px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+    .log-viewer-title { font-size: 12px; font-weight: 600; }
+    .log-content { flex: 1; overflow-y: auto; padding: 14px; font-size: 12px; line-height: 1.6; white-space: pre-wrap; word-break: break-all; background: #010409; color: var(--text); font-family: var(--font); }
+    .empty-state { display: flex; align-items: center; justify-content: center; height: 100%; color: var(--text2); font-size: 12px; flex-direction: column; gap: 8px; }
+    ::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-track { background: var(--bg); } ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+    .tool-badge { display: inline-block; background: var(--bg3); border: 1px solid var(--border); border-radius: 3px; padding: 1px 5px; font-size: 10px; color: var(--accent); }
+  </style>
+</head>
+<body>
+<div class="layout">
+  <nav class="sidebar">
+    <div class="sidebar-logo">
+      <h1>⚙ DevKit Manager</h1>
+      <div class="version">airgap-cpp-devkit</div>
+    </div>
+    <div class="nav-section">Navigation</div>
+    <a class="nav-item" href="/"><span style="width:16px;text-align:center">◈</span> Dashboard</a>
+    <a class="nav-item active" href="/logs"><span style="width:16px;text-align:center">⊞</span> Logs</a>
+    <div style="padding:16px 12px 0;font-size:10px;color:var(--text2);line-height:1.6">
+      Log directory:<br>
+      <span style="color:var(--text);word-break:break-all">{{ log_base }}</span>
+    </div>
+  </nav>
+
+  <main class="main">
+    <div class="page-header">
+      <div>
+        <div class="page-title">Install Logs</div>
+        <div class="page-subtitle">{{ logs | length }} log files found</div>
+      </div>
+    </div>
+
+    {% if logs %}
+    <div class="logs-layout">
+      <div class="log-list">
+        <div class="log-list-header">Recent logs</div>
+        {% for log in logs %}
+        <div class="log-item"
+             data-path="{{ log.path }}"
+             data-name="{{ log.name }}"
+             onclick="loadLog(this)">
+          <div class="log-item-name">{{ log.name }}</div>
+          <div class="log-item-meta">
+            <span class="tool-badge">{{ log.tool }}</span>
+            <span>{{ log.modified }}</span>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+
+      <div class="log-viewer">
+        <div class="log-viewer-header">
+          <div class="log-viewer-title" id="log-viewer-title">Select a log file</div>
+          <button class="btn btn-sm" onclick="copyLog()">⎘ Copy</button>
+        </div>
+        <div class="log-content" id="log-content">
+          <div class="empty-state">
+            <span>⊞</span>
+            <span>Select a log file from the list</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    {% else %}
+    <div style="text-align:center;padding:60px;color:var(--text2)">
+      <div style="font-size:32px;margin-bottom:12px">⊞</div>
+      <div>No log files found in {{ log_base }}</div>
+      <div style="margin-top:8px;font-size:11px">Run an installation to generate logs</div>
+    </div>
+    {% endif %}
+  </main>
+</div>
+
+<script>
+  let _logContent = '';
+
+  async function loadLog(el) {
+    const path = el.dataset.path;
+    const name = el.dataset.name;
+    document.querySelectorAll('.log-item').forEach(i => i.classList.remove('active'));
+    el.classList.add('active');
+    document.getElementById('log-viewer-title').textContent = name;
+    document.getElementById('log-content').textContent = 'Loading...';
+
+    const resp = await fetch(`/api/log?path=${encodeURIComponent(path)}`);
+    const data = await resp.json();
+    if (data.content) {
+      _logContent = data.content;
+      document.getElementById('log-content').textContent = data.content;
+    } else {
+      document.getElementById('log-content').textContent = 'Error: ' + (data.error || 'Unknown error');
+    }
+  }
+
+  function copyLog() {
+    if (_logContent) {
+      navigator.clipboard.writeText(_logContent).then(() => {
+        const btn = event.target;
+        btn.textContent = '✓ Copied';
+        setTimeout(() => btn.textContent = '⎘ Copy', 2000);
+      });
+    }
+  }
+</script>
+</body>
+</html>

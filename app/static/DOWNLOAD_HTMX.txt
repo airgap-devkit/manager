@@ -1,0 +1,3 @@
+# htmx.min.js goes here
+# Download from: https://unpkg.com/htmx.org@1.9.12/dist/htmx.min.js
+# Or: curl -L https://unpkg.com/htmx.org@1.9.12/dist/htmx.min.js -o htmx.min.js
