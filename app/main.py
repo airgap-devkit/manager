@@ -1197,3 +1197,198 @@ async def open_file(path: str):
 @app.get("/health")
 async def health():
     return {"status": "ok", "os": OS, "prefix": str(_current_prefix())}
+
+
+# ---------------------------------------------------------------------------
+# Internet connectivity check
+# ---------------------------------------------------------------------------
+
+def _internet_check() -> dict:
+    """Quick TCP reachability test. Returns {online, host, latency_ms}."""
+    import socket
+    candidates = [("pypi.org", 443), ("1.1.1.1", 53), ("8.8.8.8", 53)]
+    for host, port in candidates:
+        try:
+            t0 = time.time()
+            with socket.create_connection((host, port), timeout=3):
+                pass
+            return {"online": True, "host": host, "latency_ms": int((time.time() - t0) * 1000)}
+        except Exception:
+            continue
+    return {"online": False, "host": None, "latency_ms": None}
+
+
+@app.get("/api/internet-check")
+async def api_internet_check():
+    return _internet_check()
+
+
+# ---------------------------------------------------------------------------
+# Update checks
+# ---------------------------------------------------------------------------
+
+@app.get("/api/check-updates")
+async def api_check_updates():
+    """Check for outdated pip packages and VS Code extension/version info."""
+    result: dict = {
+        "online": False, "online_host": None, "latency_ms": None,
+        "pip": [], "pip_error": None,
+        "vscode_version": None, "vscode_extensions": [], "vscode_error": None,
+    }
+
+    # Internet check
+    inet = _internet_check()
+    result["online"] = inet["online"]
+    result["online_host"] = inet.get("host")
+    result["latency_ms"] = inet.get("latency_ms")
+
+    # pip outdated — run regardless of internet so local installs are visible
+    prefix = _current_prefix()
+    python = _find_devkit_python(prefix) or sys.executable
+    try:
+        r = subprocess.run(
+            [python, "-m", "pip", "list", "--outdated", "--format=json"],
+            capture_output=True, text=True, timeout=30,
+        )
+        if r.returncode == 0:
+            result["pip"] = json.loads(r.stdout or "[]")
+        elif r.stderr:
+            result["pip_error"] = r.stderr.strip()
+    except Exception as exc:
+        result["pip_error"] = str(exc)
+
+    # VS Code version
+    try:
+        r = subprocess.run(["code", "--version"], capture_output=True, text=True, timeout=5)
+        lines = r.stdout.strip().splitlines()
+        result["vscode_version"] = lines[0] if lines else None
+    except FileNotFoundError:
+        result["vscode_error"] = "'code' not found — is VS Code on PATH?"
+    except Exception as exc:
+        result["vscode_error"] = str(exc)
+
+    # VS Code extensions with installed versions
+    try:
+        r = subprocess.run(
+            ["code", "--list-extensions", "--show-versions"],
+            capture_output=True, text=True, timeout=10,
+        )
+        exts = []
+        for line in r.stdout.strip().splitlines():
+            line = line.strip()
+            if "@" in line:
+                ext_id, _, ver = line.partition("@")
+                exts.append({"id": ext_id, "version": ver})
+            elif line:
+                exts.append({"id": line, "version": None})
+        result["vscode_extensions"] = exts
+    except Exception:
+        pass
+
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Update / upgrade endpoints (SSE streams — require internet for pip upgrades)
+# ---------------------------------------------------------------------------
+
+@app.get("/updates/pip")
+async def updates_pip(pkg: Optional[str] = None, all: bool = False):
+    """SSE: upgrade pip packages. ?all=1 upgrades all outdated; ?pkg=name upgrades one."""
+    prefix = _current_prefix()
+    python = _find_devkit_python(prefix) or sys.executable
+
+    async def stream():
+        if not pkg and not all:
+            yield "data: ✗ No package specified\n\n"
+            yield "data: DONE:failed\n\n"
+            return
+
+        if all:
+            yield "data: Checking for outdated packages...\n\n"
+            try:
+                r = subprocess.run(
+                    [python, "-m", "pip", "list", "--outdated", "--format=json"],
+                    capture_output=True, text=True, timeout=30,
+                )
+                outdated = json.loads(r.stdout or "[]")
+            except Exception as exc:
+                yield f"data: ✗ Could not list outdated: {exc}\n\n"
+                yield "data: DONE:failed\n\n"
+                return
+            if not outdated:
+                yield "data: ✓ All packages are up to date\n\n"
+                yield "data: DONE:success\n\n"
+                return
+            packages = [p["name"] for p in outdated]
+            yield f"data: Upgrading {len(packages)} package(s): {', '.join(packages)}\n\n"
+        else:
+            packages = [pkg]
+            yield f"data: Upgrading {pkg}...\n\n"
+
+        cmd = [python, "-m", "pip", "install", "--upgrade"] + packages
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+            async for line in proc.stdout:
+                text = line.decode("utf-8", errors="replace").rstrip()
+                if text:
+                    yield f"data: {text}\n\n"
+            await proc.wait()
+            if proc.returncode == 0:
+                yield "data: ✓ Upgrade complete\n\n"
+                yield "data: DONE:success\n\n"
+            else:
+                yield f"data: ✗ pip exited with code {proc.returncode}\n\n"
+                yield "data: DONE:failed\n\n"
+        except Exception as exc:
+            yield f"data: ERROR: {exc}\n\n"
+            yield "data: DONE:failed\n\n"
+
+    return StreamingResponse(stream(), media_type="text/event-stream")
+
+
+@app.get("/updates/vscode-extensions")
+async def updates_vscode_extensions(ext_id: Optional[str] = None, all: bool = False):
+    """SSE: update VS Code extensions. ?all=1 updates all; ?ext_id=publisher.name updates one."""
+
+    async def stream():
+        if all:
+            cmd = ["code", "--update-extensions"]
+            yield "data: Updating all VS Code extensions...\n\n"
+        elif ext_id:
+            cmd = ["code", "--install-extension", ext_id, "--force"]
+            yield f"data: Updating {ext_id}...\n\n"
+        else:
+            yield "data: ✗ No extension specified\n\n"
+            yield "data: DONE:failed\n\n"
+            return
+
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+            async for line in proc.stdout:
+                text = line.decode("utf-8", errors="replace").rstrip()
+                if text:
+                    yield f"data: {text}\n\n"
+            await proc.wait()
+            if proc.returncode == 0:
+                yield "data: ✓ Done\n\n"
+                yield "data: DONE:success\n\n"
+            else:
+                yield f"data: ✗ Failed (exit {proc.returncode})\n\n"
+                yield "data: DONE:failed\n\n"
+        except FileNotFoundError:
+            yield "data: ✗ 'code' not found — is VS Code installed and on PATH?\n\n"
+            yield "data: DONE:failed\n\n"
+        except Exception as exc:
+            yield f"data: ERROR: {exc}\n\n"
+            yield "data: DONE:failed\n\n"
+
+    return StreamingResponse(stream(), media_type="text/event-stream")

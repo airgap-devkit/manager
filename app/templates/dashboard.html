@@ -738,6 +738,7 @@
         <button class="btn" onclick="refreshAll()">↺ Refresh</button>
         <button class="btn" onclick="runTests(false)" title="Run smoke tests">Run Tests</button>
         <button class="btn" onclick="openModal('upload-modal')" title="Upload a custom tool package">⬆ Add Package</button>
+        <button class="btn" onclick="openUpdatesModal()" title="Check for updates (requires internet)">↑ Check Updates</button>
         <button class="btn btn-primary" onclick="showProfileModal('cpp-dev')">▷ Install Profile</button>
       </div>
     </div>
@@ -1311,6 +1312,26 @@ bash launch.sh</div>
     </div>
   </div>
 </div>
+
+<!-- Updates Modal -->
+<div class="modal-overlay" id="updates-modal">
+  <div class="modal" style="max-width:780px;max-height:88vh">
+    <div class="modal-header">
+      <div class="modal-title">↑ Check Updates</div>
+      <button class="modal-close" onclick="closeModal('updates-modal')">×</button>
+    </div>
+    <div class="modal-body" id="updates-modal-body">
+      <div style="color:var(--text2);font-size:12px;padding:20px 0;text-align:center">Loading...</div>
+    </div>
+    <div class="modal-footer">
+      <div id="updates-footer-actions" style="display:flex;gap:8px;margin-right:auto"></div>
+      <button class="btn" onclick="openUpdatesModal()">↺ Re-check</button>
+      <button class="btn" onclick="closeModal('updates-modal')">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Updates output modal (reuses install-modal terminal) -->
 
 <!-- Toast container -->
 <div class="toast-container" id="toast-container"></div>
@@ -2319,6 +2340,161 @@ bash launch.sh</div>
       output.scrollTop = output.scrollHeight;
     };
     es.onerror = () => es.close();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Updates modal
+  // ---------------------------------------------------------------------------
+  async function openUpdatesModal() {
+    const body = document.getElementById('updates-modal-body');
+    const footerActions = document.getElementById('updates-footer-actions');
+    body.innerHTML = '<div style="color:var(--text2);font-size:12px;padding:20px 0;text-align:center">Checking connectivity and scanning for updates...</div>';
+    footerActions.innerHTML = '';
+    openModal('updates-modal');
+
+    let data;
+    try {
+      const resp = await fetch('/api/check-updates');
+      data = await resp.json();
+    } catch (e) {
+      body.innerHTML = `<div style="color:var(--red);font-size:12px;padding:12px 0">Failed to reach server: ${e}</div>`;
+      return;
+    }
+
+    // ── Internet status banner ──────────────────────────────────────────────
+    const inetColor   = data.online ? 'var(--green)' : 'var(--red)';
+    const inetDot     = data.online ? 'dot-green'    : 'dot-red';
+    const inetLabel   = data.online
+      ? `Online &nbsp;<span style="color:var(--text2)">${data.online_host} &nbsp;${data.latency_ms}ms</span>`
+      : 'Offline — updates require an internet connection';
+    const inetBanner  = `
+      <div style="display:flex;align-items:center;gap:8px;padding:10px 14px;margin-bottom:18px;
+                  border-radius:6px;border:1px solid ${inetColor}33;background:${inetColor}11;font-size:12px;color:${inetColor}">
+        <span class="dot ${inetDot}"></span> ${inetLabel}
+      </div>`;
+
+    // ── pip section ─────────────────────────────────────────────────────────
+    let pipHtml = '';
+    if (data.pip_error) {
+      pipHtml = `<div style="font-size:11px;color:var(--text2);padding:8px 0">${data.pip_error}</div>`;
+    } else if (data.pip.length === 0) {
+      pipHtml = `<div style="font-size:11px;color:var(--green);padding:8px 0">✓ All pip packages are up to date</div>`;
+    } else {
+      const rows = data.pip.map(p => `
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:7px 10px;
+                    border-bottom:1px solid var(--border);font-size:12px">
+          <span style="color:var(--text);font-weight:500">${p.name}</span>
+          <span style="color:var(--text2);flex:1;padding:0 12px">
+            <span style="color:var(--red)">${p.version}</span>
+            <span style="color:var(--text2)"> → </span>
+            <span style="color:var(--green)">${p.latest_version}</span>
+          </span>
+          <button class="btn btn-sm" onclick="runPipUpgrade('${p.name}', '${p.name} ${p.version} → ${p.latest_version}')">⬆ Update</button>
+        </div>`).join('');
+      pipHtml = `<div style="border:1px solid var(--border);border-radius:6px;overflow:hidden">${rows}</div>`;
+
+      // Update All pip button in footer
+      footerActions.innerHTML += `
+        <button class="btn btn-success btn-sm" onclick="runPipUpgradeAll(${data.pip.length})">
+          ⬆ Update All pip (${data.pip.length})
+        </button>`;
+    }
+
+    // ── VS Code section ─────────────────────────────────────────────────────
+    let vscodeHtml = '';
+    if (data.vscode_error) {
+      vscodeHtml = `<div style="font-size:11px;color:var(--text2);padding:8px 0">${data.vscode_error}</div>`;
+    } else {
+      const verRow = data.vscode_version
+        ? `<div style="font-size:11px;color:var(--text2);margin-bottom:10px">
+             Version: <span style="color:var(--accent)">${data.vscode_version}</span>
+           </div>`
+        : '';
+      let extRows = '';
+      if (data.vscode_extensions.length === 0) {
+        extRows = `<div style="font-size:11px;color:var(--text2);padding:6px 0">No extensions installed</div>`;
+      } else {
+        const items = data.vscode_extensions.map(e => `
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 10px;
+                      border-bottom:1px solid var(--border);font-size:12px">
+            <span style="color:var(--text);flex:1">${e.id}</span>
+            <span style="color:var(--text2);font-size:11px;margin-right:10px">${e.version || ''}</span>
+            <button class="btn btn-sm" onclick="runVscodeExtUpdate('${e.id}')">⬆ Update</button>
+          </div>`).join('');
+        extRows = `<div style="border:1px solid var(--border);border-radius:6px;overflow:hidden;max-height:260px;overflow-y:auto">${items}</div>`;
+
+        footerActions.innerHTML += `
+          <button class="btn btn-sm" onclick="runVscodeExtUpdateAll()">
+            ⬆ Update All Extensions
+          </button>`;
+      }
+      vscodeHtml = verRow + extRows;
+    }
+
+    // ── Assemble ────────────────────────────────────────────────────────────
+    body.innerHTML = `
+      ${inetBanner}
+      <div class="section-header" style="margin-bottom:8px">
+        <div class="section-title">pip packages
+          <span style="font-size:10px;font-weight:400;text-transform:none;letter-spacing:0;color:var(--text2);margin-left:6px">
+            ${data.pip.length > 0 ? data.pip.length + ' outdated' : 'up to date'}
+          </span>
+        </div>
+      </div>
+      <div style="margin-bottom:20px">${pipHtml}</div>
+
+      <div class="section-header" style="margin-bottom:8px">
+        <div class="section-title">VS Code
+          <span style="font-size:10px;font-weight:400;text-transform:none;letter-spacing:0;color:var(--text2);margin-left:6px">
+            ${data.vscode_extensions.length} extension(s) installed
+          </span>
+        </div>
+      </div>
+      <div style="margin-bottom:8px">${vscodeHtml}</div>
+      ${data.online
+        ? '<div style="font-size:10px;color:var(--text2);margin-top:6px">Extension updates pull from the VS Code marketplace. Run <em>Update All Extensions</em> to refresh them.</div>'
+        : '<div style="font-size:10px;color:var(--yellow);margin-top:6px">⚠ No internet — updates will not reach external registries.</div>'}
+    `;
+  }
+
+  function _runUpdateStream(url, label) {
+    closeModal('updates-modal');
+    document.getElementById('install-modal-title').textContent = label;
+    const output = document.getElementById('install-output');
+    output.textContent = '';
+    openModal('install-modal');
+    const es = new EventSource(url);
+    es.onmessage = function(e) {
+      const line = e.data;
+      if (line.startsWith('DONE:')) {
+        es.close();
+        const ok = line === 'DONE:success';
+        showToast(ok ? `✓ ${label} complete` : `✗ ${label} failed`, ok ? 'success' : 'error');
+        return;
+      }
+      const span = document.createElement('span');
+      span.className = 'terminal-line';
+      if (line.startsWith('✓') || line.includes('[OK]')) span.classList.add('ok');
+      else if (line.startsWith('✗') || line.includes('ERROR') || line.includes('FAIL')) span.classList.add('err');
+      span.textContent = line;
+      output.appendChild(span);
+      output.appendChild(document.createTextNode('\n'));
+      output.scrollTop = output.scrollHeight;
+    };
+    es.onerror = () => es.close();
+  }
+
+  function runPipUpgrade(pkgName, label) {
+    _runUpdateStream(`/updates/pip?pkg=${encodeURIComponent(pkgName)}`, `pip upgrade: ${label}`);
+  }
+  function runPipUpgradeAll(count) {
+    _runUpdateStream(`/updates/pip?all=1`, `pip upgrade all (${count} packages)`);
+  }
+  function runVscodeExtUpdate(extId) {
+    _runUpdateStream(`/updates/vscode-extensions?ext_id=${encodeURIComponent(extId)}`, `VS Code: update ${extId}`);
+  }
+  function runVscodeExtUpdateAll() {
+    _runUpdateStream(`/updates/vscode-extensions?all=1`, 'VS Code: update all extensions');
   }
 
   // ---------------------------------------------------------------------------
