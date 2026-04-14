@@ -2180,9 +2180,10 @@ bash launch.sh</div>
     ]);
     const data   = await toolResp.json();
     const stData = await stResp.json();
-    const stMap    = stData.status  || {};
-    const stAvail  = stData.available !== false;
-    const stErr    = stData.error   || null;
+    const stMap      = stData.status            || {};
+    const stVersions = stData.installed_versions || {};
+    const stAvail    = stData.available !== false;
+    const stErr      = stData.error             || null;
 
     const tS   = `width:100%;border-collapse:collapse;font-size:12px`;
     const thS  = `text-align:left;padding:6px 10px;font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid var(--border);background:var(--bg3)`;
@@ -2265,12 +2266,20 @@ bash launch.sh</div>
         <th style="${thS};text-align:right">Status / Action</th>
       </tr></thead><tbody>`;
       html += data.packages.map(p => {
-        const inst = stMap[p.name] === true;
+        const inst        = stMap[p.name] === true;
+        const installedVer = stVersions[p.name];
+        const pinned       = p.version;
+        // Show actually installed version when available; note if it differs from pinned
+        const verDisplay = installedVer
+          ? (installedVer !== pinned
+            ? `<span style="color:var(--green)">${installedVer}</span> <span style="color:var(--text2);opacity:0.5">(pinned: ${pinned})</span>`
+            : `<span class="badge-category">${installedVer}</span>`)
+          : `<span class="badge-category">${pinned}</span>`;
         return `<tr>
           <td style="${tdS}">
             <div style="font-weight:600">${p.name}</div>
             <div style="font-size:10px;color:var(--text2);margin-top:2px">${p.description}</div>
-            <div style="font-size:10px;color:var(--text2);margin-top:2px;opacity:0.6">${p.category} &nbsp;·&nbsp; <span class="badge-category">${p.version}</span></div>
+            <div style="font-size:10px;color:var(--text2);margin-top:2px;opacity:0.6">${p.category} &nbsp;·&nbsp; ${verDisplay}</div>
           </td>
           <td style="${tdRS}">
             ${actionBtn(p.name, p.name, inst)}
@@ -2462,6 +2471,22 @@ bash launch.sh</div>
     document.getElementById('install-modal-title').textContent = label;
     const output = document.getElementById('install-output');
     output.textContent = '';
+
+    // Hijack the close button: after an update op, re-open the updates modal
+    // (fresh re-check) instead of reloading the whole page.
+    const closeBtn = document.getElementById('install-close-btn');
+    const origText    = closeBtn.textContent;
+    const origOnclick = closeBtn.getAttribute('onclick');
+    closeBtn.textContent = 'Close';
+    closeBtn.onclick = function() {
+      closeModal('install-modal');
+      // Restore for normal install ops
+      closeBtn.textContent = origText;
+      closeBtn.setAttribute('onclick', origOnclick);
+      closeBtn.onclick = null;
+      openUpdatesModal();
+    };
+
     openModal('install-modal');
     const es = new EventSource(url);
     es.onmessage = function(e) {

@@ -1068,11 +1068,18 @@ async def subpkg_status(tool_id: str):
                 [python, "-m", "pip", "list", "--format=json"],
                 capture_output=True, text=True, timeout=20,
             )
-            installed = {p["name"].lower() for p in json.loads(r.stdout or "[]")}
+            pip_list = json.loads(r.stdout or "[]")
+            # Map lowercase name → installed version
+            installed: dict[str, str] = {p["name"].lower(): p["version"] for p in pip_list}
             return {
                 "available": True,
                 "status": {p["name"]: p["name"].lower() in installed
                            for p in tool.get("packages", [])},
+                # Actual installed versions (may differ from devkit.json after upgrades)
+                "installed_versions": {
+                    p["name"]: installed.get(p["name"].lower())
+                    for p in tool.get("packages", [])
+                },
             }
         except Exception as exc:
             return JSONResponse({"error": str(exc)}, status_code=500)
