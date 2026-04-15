@@ -2427,18 +2427,23 @@ bash launch.sh</div>
           <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 10px;
                       border-bottom:1px solid var(--border);font-size:12px">
             <span style="color:var(--text);flex:1">${e.id}</span>
-            <span style="color:var(--text2);font-size:11px;margin-right:10px">${e.version || ''}</span>
-            <button class="btn btn-sm" onclick="runVscodeExtUpdate('${e.id}')">⬆ Update</button>
+            <span style="color:var(--text2);font-size:11px">${e.version || ''}</span>
           </div>`).join('');
         extRows = `<div style="border:1px solid var(--border);border-radius:6px;overflow:hidden;max-height:260px;overflow-y:auto">${items}</div>`;
-
-        footerActions.innerHTML += `
-          <button class="btn btn-sm" onclick="runVscodeExtUpdateAll()">
-            ⬆ Update All Extensions
-          </button>`;
       }
       vscodeHtml = verRow + extRows;
     }
+
+    // ── VS Code footer note (always shown, online or not) ───────────────────
+    const vscodeNote = data.vscode_error
+      ? ''
+      : `<div style="font-size:10px;color:var(--text2);margin-top:6px">
+           To update extensions: on an internet-connected machine run
+           <code>python3 scripts/fetch-vscode-extensions.py --from-installed</code>,
+           copy the downloaded .vsix files into
+           <code>dev-tools/vscode-extensions/vendor/</code>,
+           then run <em>VS Code Extensions</em> install here.
+         </div>`;
 
     // ── Assemble ────────────────────────────────────────────────────────────
     body.innerHTML = `
@@ -2455,14 +2460,12 @@ bash launch.sh</div>
       <div class="section-header" style="margin-bottom:8px">
         <div class="section-title">VS Code
           <span style="font-size:10px;font-weight:400;text-transform:none;letter-spacing:0;color:var(--text2);margin-left:6px">
-            ${data.vscode_extensions.length} extension(s) installed
+            ${data.vscode_extensions ? data.vscode_extensions.length + ' extension(s) installed' : ''}
           </span>
         </div>
       </div>
       <div style="margin-bottom:8px">${vscodeHtml}</div>
-      ${data.online
-        ? '<div style="font-size:10px;color:var(--text2);margin-top:6px">Extension updates pull from the VS Code marketplace. Run <em>Update All Extensions</em> to refresh them.</div>'
-        : '<div style="font-size:10px;color:var(--yellow);margin-top:6px">⚠ No internet — updates will not reach external registries.</div>'}
+      ${vscodeNote}
     `;
   }
 

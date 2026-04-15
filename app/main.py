@@ -1360,42 +1360,20 @@ async def updates_pip(pkg: Optional[str] = None, all: bool = False):
 
 @app.get("/updates/vscode-extensions")
 async def updates_vscode_extensions(ext_id: Optional[str] = None, all: bool = False):
-    """SSE: update VS Code extensions. ?all=1 updates all; ?ext_id=publisher.name updates one."""
+    """SSE: VS Code extension updates are not supported in air-gapped mode.
+    Extensions must be mirrored offline via scripts/fetch-vscode-extensions.py."""
 
     async def stream():
-        if all:
-            cmd = ["code", "--update-extensions"]
-            yield "data: Updating all VS Code extensions...\n\n"
-        elif ext_id:
-            cmd = ["code", "--install-extension", ext_id, "--force"]
-            yield f"data: Updating {ext_id}...\n\n"
-        else:
-            yield "data: ✗ No extension specified\n\n"
-            yield "data: DONE:failed\n\n"
-            return
-
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,
-            )
-            async for line in proc.stdout:
-                text = line.decode("utf-8", errors="replace").rstrip()
-                if text:
-                    yield f"data: {text}\n\n"
-            await proc.wait()
-            if proc.returncode == 0:
-                yield "data: ✓ Done\n\n"
-                yield "data: DONE:success\n\n"
-            else:
-                yield f"data: ✗ Failed (exit {proc.returncode})\n\n"
-                yield "data: DONE:failed\n\n"
-        except FileNotFoundError:
-            yield "data: ✗ 'code' not found — is VS Code installed and on PATH?\n\n"
-            yield "data: DONE:failed\n\n"
-        except Exception as exc:
-            yield f"data: ERROR: {exc}\n\n"
-            yield "data: DONE:failed\n\n"
+        yield "data: ✗ VS Code extension updates require internet access.\n\n"
+        yield "data: \n\n"
+        yield "data: To update extensions offline:\n\n"
+        yield "data:   1. On an internet-connected machine run:\n\n"
+        yield "data:      python3 scripts/fetch-vscode-extensions.py --from-installed\n\n"
+        yield "data:   2. Copy the downloaded .vsix files into:\n\n"
+        yield "data:      dev-tools/vscode-extensions/vendor/\n\n"
+        yield "data:   3. Update dev-tools/vscode-extensions/manifest.json with the\n\n"
+        yield "data:      generated manifest-new.json entries.\n\n"
+        yield "data:   4. Run the VS Code Extensions install from this dashboard.\n\n"
+        yield "data: DONE:failed\n\n"
 
     return StreamingResponse(stream(), media_type="text/event-stream")
