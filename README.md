@@ -35,6 +35,11 @@ Works on **Windows 11** (Git Bash / MINGW64) and **RHEL 8/9** (Bash 4.x).
 - **⊞ Open** button to open the install log in the OS default editor
 - **Package Origin** section for user-uploaded packages (uploaded by, upload date)
 
+### Updates & Connectivity
+- **Internet connectivity detection** — dashboard badge shows online vs. air-gapped mode automatically
+- **Pip update checker** — scans installed pip sub-packages for newer versions; one-click upgrade with live SSE output
+- **VS Code extension updater** — offline-first workflow: installs from a local `.vsix` if present, falls back to marketplace when online
+
 ### System
 - **Prebuilt-binaries submodule** status card — initialise or re-sync from the UI
 - **Install prefix editor** — switch between user and system-wide install paths
@@ -179,6 +184,25 @@ Tools are discovered automatically from `devkit.json` manifests — no Python ed
 | `uses_prebuilt` | no | `true` if the prebuilt-binaries submodule is required |
 | `sort_order` | no | Integer display order (lower = first) |
 | `version_label` | no | Override the version string shown in the UI |
+| `sub_packages` | no | Array of sub-package objects for plugin-style tools (see below) |
+
+### Sub-packages (`sub_packages` array)
+
+For tools with individually installable items (pip packages, VS Code extensions), add a `sub_packages` array:
+
+```json
+{
+  "id": "python-tools",
+  "name": "Python Tools",
+  "category": "Plugins",
+  "sub_packages": [
+    { "id": "black", "name": "Black", "type": "pip" },
+    { "id": "ms-python.python", "name": "Python Extension", "type": "vscode" }
+  ]
+}
+```
+
+Supported `type` values: `pip`, `vscode`
 
 ---
 
@@ -198,13 +222,26 @@ The manager exposes a REST API used by the UI — useful for scripted installs o
 | `/subpkg-install` | GET | SSE stream — install/uninstall one sub-package |
 | `/packages/preflight` | POST | Upload zip, analyse, return pre-fill hints |
 | `/packages/finalize` | POST | Create package from wizard form data |
+| `/packages/staging/{id}` | DELETE | Cancel and clean up an in-progress upload session |
 | `/packages/{id}` | DELETE | Remove user-uploaded package |
+| `/api/prefix` | GET | Get current install prefix |
+| `/api/prefix` | POST | Set install prefix |
+| `/api/prefix` | DELETE | Reset install prefix to default |
+| `/api/submodule` | GET | Get prebuilt-binaries submodule status |
+| `/init-submodule` | POST | Initialise or re-sync the prebuilt-binaries submodule |
+| `/api/connectivity` | GET | Cached connectivity flag (online / airgapped) |
+| `/api/internet-check` | GET | Live internet connectivity probe |
+| `/api/check-updates` | GET | Check pip + VS Code extension updates |
+| `/updates/pip` | GET | SSE stream — upgrade a pip sub-package |
+| `/updates/vscode-extensions` | GET | SSE stream — update a VS Code extension |
+| `/api/log` | GET | Fetch contents of a tool install log |
+| `/logs` | GET | Browse install logs (HTML page) |
 | `/open-file` | GET | Open a file in the OS default application |
-| `/health` | GET | Health check — returns OS and prefix |
+| `/health` | GET | Health check — returns OS, prefix, and Python info |
 
 ---
 
 ## License
 
-Copyright (c) 2024-present Nima Shafie. Source-available — see [LICENSE](LICENSE) for terms.
+Copyright (c) 2024–2026 Nima Shafie. Source-available — see [LICENSE](LICENSE) for terms.
 Commercial use requires written permission from the author.
