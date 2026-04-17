@@ -1,9 +1,11 @@
-# airgap-devkit-manager
+# airgap-devkit
 
 > Web-based package manager UI for [airgap-cpp-devkit](https://github.com/NimaShafie/airgap-cpp-devkit) — built with **FastAPI + HTMX**, zero JavaScript framework, zero build step.
 
 Designed for **air-gapped / network-restricted environments**. Runs entirely offline once deployed.
 Works on **Windows 11** (Git Bash / MINGW64) and **RHEL 8/9** (Bash 4.x).
+
+> **Note:** This repo is the engine. Tool content (devkit.json manifests, setup scripts) lives in [airgap-cpp-devkit](https://github.com/NimaShafie/airgap-cpp-devkit).
 
 ---
 
@@ -48,9 +50,39 @@ Works on **Windows 11** (Git Bash / MINGW64) and **RHEL 8/9** (Bash 4.x).
 | OS | Windows 10/11 or RHEL 8/9 |
 | Shell | Git Bash (Windows) / Bash 4.x (Linux) |
 
-Python dependencies (`fastapi`, `uvicorn`, `jinja2`, `python-multipart`, `aiofiles`) are
-auto-installed by the launcher on first run. For air-gapped machines, pre-download wheels
-into `vendor/` first (see [Air-Gap Install](#air-gap-install)).
+---
+
+## Installation
+
+```bash
+pip install airgap-devkit
+```
+
+Then run from the directory that contains your tool tree:
+
+```bash
+airgap-devkit
+```
+
+---
+
+## Air-Gap Install
+
+Pre-download wheels on a machine with internet access, then copy `vendor/` to the air-gapped machine:
+
+```bash
+pip download airgap-devkit \
+  --dest vendor/ \
+  --only-binary=:all: \
+  --platform manylinux2014_x86_64 \
+  --python-version 38
+```
+
+Install on the air-gapped machine:
+
+```bash
+pip install --no-index --find-links=vendor/ airgap-devkit
+```
 
 ---
 
@@ -65,11 +97,11 @@ cd airgap-cpp-devkit
 bash launch.sh
 ```
 
-Or start the manager directly:
+Or install and run standalone:
 
 ```bash
-cd airgap-devkit-manager
-python devkit.py
+pip install airgap-devkit
+airgap-devkit
 ```
 
 Opens automatically at **http://127.0.0.1:8080**
@@ -77,44 +109,48 @@ Opens automatically at **http://127.0.0.1:8080**
 ### Options
 
 ```bash
-python devkit.py --port 8080        # default port
-python devkit.py --host 0.0.0.0     # listen on all interfaces (LAN access)
-python devkit.py --no-browser       # don't auto-open browser
+airgap-devkit --port 8080           # default port
+airgap-devkit --host 0.0.0.0        # listen on all interfaces (LAN access)
+airgap-devkit --no-browser          # don't auto-open browser
+airgap-devkit --tools /path/to/repo # point at a different tool tree
 ```
 
----
+### Configuration file
 
-## Air-Gap Install
+Copy `devkit.config.json.example` to `devkit.config.json` in your working directory
+to customise branding, default port, and profile without CLI flags:
 
-Pre-download wheels on a machine with internet access, then copy `vendor/` to the air-gapped machine:
-
-```bash
-pip download fastapi uvicorn python-multipart jinja2 aiofiles \
-  --dest airgap-devkit-manager/vendor/ \
-  --only-binary=:all: \
-  --platform manylinux2014_x86_64 \
-  --python-version 38
+```json
+{
+  "team_name": "Platform Team",
+  "devkit_name": "Internal DevKit",
+  "theme_color": "#0d3349",
+  "port": 9090
+}
 ```
-
-The launcher detects `vendor/` automatically and installs from there using `--no-index`.
 
 ---
 
 ## File Structure
 
 ```
-airgap-devkit-manager/
-  devkit.py              — launcher (start here)
-  requirements.txt       — Python dependencies
-  vendor/                — pre-downloaded wheels for air-gap (gitignored, optional)
-  .devkit-prefix         — local install prefix override (gitignored, machine-specific)
-  app/
-    main.py              — FastAPI application, all endpoints, tool discovery
-    templates/
-      dashboard.html     — main UI (HTMX, inline CSS/JS, no build step)
-      logs.html          — install log browser
-    static/
-      htmx.min.js        — vendored HTMX v1.x (~14 KB, no CDN required)
+airgap-devkit/
+  pyproject.toml             — package metadata and build config
+  devkit.config.json.example — configuration template
+  requirements.txt           — deprecated, see pyproject.toml
+  devkit.py                  — deprecated shim (calls airgap-devkit entry point)
+  MANIFEST.in                — package data inclusion rules
+  src/
+    airgap_devkit/
+      __init__.py            — package version
+      main.py                — FastAPI application, all endpoints, tool discovery
+      launcher.py            — console entry point (airgap-devkit command)
+      config.py              — DevkitConfig dataclass, loads devkit.config.json
+      templates/
+        dashboard.html       — main UI (HTMX, inline CSS/JS, no build step)
+        logs.html            — install log browser
+      static/
+        htmx.min.js          — vendored HTMX v1.x (~14 KB, no CDN required)
 ```
 
 ---

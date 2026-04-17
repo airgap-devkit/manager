@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>DevKit Manager</title>
+  <title>{{ config.devkit_name }}</title>
   <script src="/static/htmx.min.js"></script>
   <style>
     :root {
@@ -21,6 +21,7 @@
       --orange: #ffa657;
       --radius: 8px;
       --font: 'SF Mono', 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+      --accent-color: {{ config.theme_color }};
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -553,6 +554,23 @@
     .htmx-indicator { display: none; }
     .htmx-request .htmx-indicator { display: inline-block; }
     .htmx-request.htmx-indicator { display: inline-block; }
+
+    /* Connectivity pill */
+    .connectivity-pill {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 600;
+      white-space: nowrap;
+    }
+    .pill-online    { color: var(--green);  background: rgba(63,185,80,0.15);  border: 1px solid rgba(63,185,80,0.3); }
+    .pill-airgapped { color: var(--yellow); background: rgba(210,153,34,0.15); border: 1px solid rgba(210,153,34,0.3); }
+
+    /* Air-gapped banner */
+    .airgap-banner {
+      display: flex; align-items: center; gap: 8px;
+      margin-bottom: 16px; padding: 8px 14px;
+      background: rgba(210,153,34,0.08); border: 1px solid rgba(210,153,34,0.25);
+      border-radius: var(--radius); font-size: 12px; color: var(--yellow);
+    }
   </style>
 </head>
 <body>
@@ -713,7 +731,10 @@
   <main class="main">
     <div class="page-header">
       <div style="flex-shrink:0">
-        <div class="page-title">Tool Dashboard</div>
+        <div class="page-title">{{ config.dashboard_title }}</div>
+        {% if config.team_name != 'My Team' %}
+        <div class="page-subtitle">{{ config.dashboard_title }} — {{ config.team_name }}</div>
+        {% endif %}
         <div class="page-subtitle">Manage your airgap-cpp-devkit installations · {{ total_count }} tools</div>
       </div>
 
@@ -735,13 +756,22 @@
       </div>
 
       <div class="header-actions" style="flex-shrink:0">
+        {% if mode == 'online' %}
+        <span class="connectivity-pill pill-online">🌐 Online</span>
+        {% else %}
+        <span class="connectivity-pill pill-airgapped">🔒 Air-Gapped</span>
+        {% endif %}
         <button class="btn" onclick="refreshAll()">↺ Refresh</button>
         <button class="btn" onclick="runTests(false)" title="Run smoke tests">Run Tests</button>
         <button class="btn" onclick="openModal('upload-modal')" title="Upload a custom tool package">⬆ Add Package</button>
-        <button class="btn" onclick="openUpdatesModal()" title="Check for updates (requires internet)">↑ Check Updates</button>
+        <button class="btn" id="check-updates-btn" onclick="openUpdatesModal()" title="Check for updates (requires internet)"{% if mode == 'airgapped' %} style="display:none"{% endif %}>↑ Check Updates</button>
         <button class="btn btn-primary" onclick="showProfileModal('cpp-dev')">▷ Install Profile</button>
       </div>
     </div>
+
+    {% if mode == 'airgapped' %}
+    <div class="airgap-banner">🔒 Air-Gapped Mode — update checks disabled</div>
+    {% endif %}
 
     <!-- Stats + Submodule status -->
     <div class="info-grid" style="grid-template-columns: 1fr 1fr 1fr; margin-bottom: 20px;">

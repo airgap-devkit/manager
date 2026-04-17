@@ -1,3 +1,5 @@
+# Deprecated — see pyproject.toml for canonical dependencies.
+# Kept here for reference and for tooling that reads requirements.txt directly.
 fastapi>=0.110.0
 uvicorn>=0.27.0
 python-multipart>=0.0.9

@@ -1,0 +1,26 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "airgap-devkit"
+version = "0.1.0"
+description = "Air-gapped developer toolkit — web-based package manager and tool dashboard"
+requires-python = ">=3.8"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "jinja2",
+    "python-multipart",
+    "aiofiles",
+]
+
+[project.scripts]
+airgap-devkit = "airgap_devkit.launcher:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/airgap_devkit"]
+
+[tool.hatch.build.targets.wheel.shared-data]
+"src/airgap_devkit/templates" = "airgap_devkit/templates"
+"src/airgap_devkit/static" = "airgap_devkit/static"

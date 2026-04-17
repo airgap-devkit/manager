@@ -15,6 +15,7 @@ import zipfile
 import hashlib
 import time
 import uuid
+from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -24,6 +25,9 @@ from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 import jinja2
 from fastapi.templating import Jinja2Templates
+
+from airgap_devkit.config import DevkitConfig
+from airgap_devkit.connectivity import detect_mode
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -131,27 +135,27 @@ def _get_system_info() -> dict:
 # To add a user tool:     upload a .zip via the "Add Package" button in the UI.
 #
 # Scan order (first match by id wins):
-#   dev-tools/*/          dev-tools/*/*/
-#   build-tools/*/
-#   languages/*/
-#   toolchains/*/         toolchains/*/*/    toolchains/*/*/*/
-#   frameworks/*/
-#   packages/*/           ← built-in tools with no dedicated directory
-#   user-packages/*/      ← user-uploaded packages (gitignored)
+#   tools/dev-tools/*/          tools/dev-tools/*/*/
+#   tools/build-tools/*/
+#   tools/languages/*/
+#   tools/toolchains/*/         tools/toolchains/*/*/    tools/toolchains/*/*/*/
+#   tools/frameworks/*/
+#   packages/*/           ← built-in tools with no dedicated directory (repo root)
+#   user-packages/*/      ← user-uploaded packages (gitignored, repo root)
 # ---------------------------------------------------------------------------
 
 # Each entry: (glob_pattern, source_tag)
 _TOOL_SCAN_PATTERNS: list[tuple[str, str]] = [
-    ("dev-tools/*/devkit.json",          "builtin"),
-    ("dev-tools/*/*/devkit.json",        "builtin"),
-    ("build-tools/*/devkit.json",        "builtin"),
-    ("languages/*/devkit.json",          "builtin"),
-    ("toolchains/*/devkit.json",         "builtin"),
-    ("toolchains/*/*/devkit.json",       "builtin"),
-    ("toolchains/*/*/*/devkit.json",     "builtin"),
-    ("frameworks/*/devkit.json",         "builtin"),
-    ("packages/*/devkit.json",           "builtin"),
-    ("user-packages/*/devkit.json",      "user"),
+    ("tools/dev-tools/*/devkit.json",          "builtin"),
+    ("tools/dev-tools/*/*/devkit.json",        "builtin"),
+    ("tools/build-tools/*/devkit.json",        "builtin"),
+    ("tools/languages/*/devkit.json",          "builtin"),
+    ("tools/toolchains/*/devkit.json",         "builtin"),
+    ("tools/toolchains/*/*/devkit.json",       "builtin"),
+    ("tools/toolchains/*/*/*/devkit.json",     "builtin"),
+    ("tools/frameworks/*/devkit.json",         "builtin"),
+    ("packages/*/devkit.json",                 "builtin"),
+    ("user-packages/*/devkit.json",            "user"),
 ]
 
 _REQUIRED_MANIFEST_FIELDS = ["id", "name", "version", "category", "platform",
@@ -404,9 +408,21 @@ def get_all_tools_status() -> list:
 
 
 # ---------------------------------------------------------------------------
+# Config + connectivity
+# ---------------------------------------------------------------------------
+_config = DevkitConfig.load()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    app.state.mode = detect_mode()
+    yield
+
+
+# ---------------------------------------------------------------------------
 # App
 # ---------------------------------------------------------------------------
-app = FastAPI(title="DevKit Manager", docs_url=None, redoc_url=None)
+app = FastAPI(title="DevKit Manager", docs_url=None, redoc_url=None, lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 _jinja_env = jinja2.Environment(
     loader=jinja2.FileSystemLoader(str(TEMPLATES_DIR)),
@@ -443,7 +459,14 @@ async def dashboard(request: Request):
         "hostname": platform.node(),
         "submodule": submodule,
         "system_info": _get_system_info(),
+        "config": _config,
+        "mode": request.app.state.mode,
     })
+
+
+@app.get("/api/connectivity", response_class=JSONResponse)
+async def api_connectivity(request: Request):
+    return {"mode": request.app.state.mode}
 
 
 @app.get("/api/prefix", response_class=JSONResponse)
@@ -668,6 +691,8 @@ async def logs_page(request: Request):
         "logs": logs,
         "log_base": str(log_base),
         "os": OS,
+        "config": _config,
+        "mode": request.app.state.mode,
     })
 
 
@@ -1045,7 +1070,7 @@ def _find_devkit_python(prefix: Path) -> Optional[str]:
 
 
 def _pip_vendor_dir() -> Optional[Path]:
-    d = REPO_ROOT / "languages" / "python" / "pip-packages"
+    d = REPO_ROOT / "tools" / "languages" / "python" / "pip-packages"
     return d if d.exists() else None
 
 
@@ -1143,7 +1168,7 @@ async def subpkg_install_stream(tool_id: str, pkg_id: str, uninstall: bool = Fal
                 cmd = ["code", "--uninstall-extension", pkg_id]
             else:
                 # Prefer a local .vsix file if available
-                vsix_dir = REPO_ROOT / "dev-tools" / "vscode-extensions"
+                vsix_dir = REPO_ROOT / "tools" / "dev-tools" / "vscode-extensions"
                 short = pkg_id.split(".")[-1].lower()
                 vsix = next((f for f in vsix_dir.glob("*.vsix")
                              if short in f.name.lower()), None)
@@ -1370,8 +1395,8 @@ async def updates_vscode_extensions(ext_id: Optional[str] = None, all: bool = Fa
         yield "data:   1. On an internet-connected machine run:\n\n"
         yield "data:      python3 scripts/fetch-vscode-extensions.py --from-installed\n\n"
         yield "data:   2. Copy the downloaded .vsix files into:\n\n"
-        yield "data:      dev-tools/vscode-extensions/vendor/\n\n"
-        yield "data:   3. Update dev-tools/vscode-extensions/manifest.json with the\n\n"
+        yield "data:      tools/dev-tools/vscode-extensions/vendor/\n\n"
+        yield "data:   3. Update tools/dev-tools/vscode-extensions/manifest.json with the\n\n"
         yield "data:      generated manifest-new.json entries.\n\n"
         yield "data:   4. Run the VS Code Extensions install from this dashboard.\n\n"
         yield "data: DONE:failed\n\n"

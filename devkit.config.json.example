@@ -1,0 +1,13 @@
+{
+  "_comment": "Copy this file to devkit.config.json and customise. All fields are optional.",
+
+  "team_name": "My Team",
+  "devkit_name": "DevKit Manager",
+  "theme_color": "#1a1a2e",
+  "dashboard_title": "Tool Dashboard",
+
+  "hostname": "127.0.0.1",
+  "port": 8080,
+
+  "default_profile": "minimal"
+}

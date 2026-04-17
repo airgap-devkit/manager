@@ -1,0 +1,5 @@
+recursive-include src/airgap_devkit/templates *
+recursive-include src/airgap_devkit/static *
+include devkit.config.json.example
+include README.md
+include LICENSE
