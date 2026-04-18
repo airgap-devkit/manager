@@ -463,11 +463,10 @@
     .info-value.accent { color: var(--accent); }
 
     /* Universal copy-able code block */
-    .code-wrap { position: relative; }
-    .code-wrap .terminal { padding-right: 72px; }   /* room for 1 button */
+    .code-wrap { display: flex; flex-direction: column; gap: 4px; }
+    .code-wrap .terminal { overflow-x: auto; white-space: nowrap; }
     .code-btn-group {
-      position: absolute; top: 6px; right: 8px;
-      display: flex; gap: 4px; align-items: flex-start; z-index: 1;
+      display: flex; gap: 4px; align-items: center; justify-content: flex-end;
     }
     .copy-btn {
       background: rgba(33,38,45,0.95); border: 1px solid var(--border);
@@ -763,6 +762,7 @@
         {% endif %}
         <button class="btn" onclick="refreshAll()">↺ Refresh</button>
         <button class="btn" onclick="runTests(false)" title="Run smoke tests">Run Tests</button>
+        <button class="btn" id="fix-path-btn" onclick="openFixPathModal()" title="Prepend devkit tool binaries to your user PATH so they take priority over system tools">⚡ Fix PATH</button>
         <button class="btn" onclick="openModal('upload-modal')" title="Upload a custom tool package">⬆ Add Package</button>
         <button class="btn" id="check-updates-btn" onclick="openUpdatesModal()" title="Check for updates (requires internet)"{% if mode == 'airgapped' %} style="display:none"{% endif %}>↑ Check Updates</button>
         <button class="btn btn-primary" onclick="showProfileModal('cpp-dev')">▷ Install Profile</button>
@@ -865,7 +865,7 @@
           <div>
             <div class="tool-name">{{ tool.name }}</div>
             <div class="tool-version">
-              {% if tool.version_label is defined %}{{ tool.version_label }}
+              {% if tool.version_label %}{{ tool.version_label }}
               {% else %}v{{ tool.version }}{% endif %}
             </div>
           </div>
@@ -1035,7 +1035,26 @@
     <div class="modal-footer">
       <button class="btn" id="receipt-delete-btn"    style="display:none;margin-right:auto;color:var(--red);border-color:rgba(248,81,73,0.4)">🗑 Remove Package</button>
       <button class="btn btn-danger" id="receipt-uninstall-btn" style="display:none">✕ Uninstall</button>
+      <button class="btn btn-primary" id="receipt-install-btn" style="display:none">↓ Install</button>
+      <button class="btn" id="receipt-check-btn" style="display:none">◈ Check</button>
       <button class="btn" onclick="closeModal('receipt-modal')">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Fix PATH Modal -->
+<div class="modal-overlay" id="fix-path-modal">
+  <div class="modal" style="max-width:540px">
+    <div class="modal-header">
+      <div class="modal-title">⚡ Fix PATH</div>
+      <button class="modal-close" onclick="closeModal('fix-path-modal')">×</button>
+    </div>
+    <div class="modal-body" id="fix-path-modal-body">
+      <div style="color:var(--text2);font-size:12px;padding:20px 0;text-align:center">Loading…</div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeModal('fix-path-modal')">Close</button>
+      <button class="btn btn-primary" id="fix-path-apply-btn" style="display:none" onclick="runFixPath()">⚡ Apply</button>
     </div>
   </div>
 </div>
@@ -1391,9 +1410,23 @@ bash launch.sh</div>
   }
   function closeModal(id) {
     document.getElementById(id).classList.remove('active');
+    if (id === 'receipt-modal') _stopCheck();
   }
   document.addEventListener('keydown', e => {
-    if (e.key === 'Escape') document.querySelectorAll('.modal-overlay.active').forEach(m => m.classList.remove('active'));
+    if (e.key === 'Escape') {
+      const wasReceiptOpen = document.getElementById('receipt-modal').classList.contains('active');
+      document.querySelectorAll('.modal-overlay.active').forEach(m => m.classList.remove('active'));
+      if (wasReceiptOpen) _stopCheck();
+    }
+  });
+  document.querySelectorAll('.modal-overlay').forEach(overlay => {
+    overlay.addEventListener('click', e => {
+      if (e.target === overlay) {
+        const wasReceiptOpen = overlay.id === 'receipt-modal';
+        overlay.classList.remove('active');
+        if (wasReceiptOpen) _stopCheck();
+      }
+    });
   });
 
   // ---------------------------------------------------------------------------
@@ -1438,6 +1471,11 @@ bash launch.sh</div>
   async function showReceipt(toolId, toolName) {
     document.getElementById('receipt-modal-title').textContent = toolName + ' — Info';
     const body = document.getElementById('receipt-modal-body');
+    // Clear stale content and stop any running check stream immediately
+    _stopCheck();
+    document.getElementById('receipt-check-btn').style.display = 'none';
+    document.getElementById('receipt-install-btn').style.display = 'none';
+    body.innerHTML = '<div style="color:var(--text2);font-size:12px;padding:20px 0;text-align:center">Loading…</div>';
     openModal('receipt-modal');
 
     const resp = await fetch(`/api/tool/${toolId}`);
@@ -1513,7 +1551,7 @@ bash launch.sh</div>
       <div style="border-top:1px solid var(--border);padding-top:10px;margin-top:10px">
         <div style="color:var(--text2);font-size:11px;margin-bottom:4px">Setup script:</div>
         <div class="code-wrap">
-          <div class="terminal" style="min-height:auto;padding:8px 12px;padding-right:132px;word-break:break-all">${data.setup_abs || data.setup}</div>
+          <div class="terminal" style="min-height:auto;padding:8px 12px">${data.setup_abs || data.setup}</div>
           <div class="code-btn-group">
             <button class="copy-btn" style="color:var(--green);border-color:rgba(63,185,80,0.35)"
                     data-action="run-tool" data-tool-id="${data.id}" data-tool-name="${data.name.replace(/"/g,'&quot;')}">▶ Run</button>
@@ -1522,7 +1560,7 @@ bash launch.sh</div>
         </div>
         <div style="color:var(--text2);font-size:11px;margin-top:10px;margin-bottom:4px">Install log:</div>
         <div class="code-wrap">
-          <div class="terminal" style="min-height:auto;padding:8px 12px;padding-right:132px;word-break:break-all">${data.receipt_path}</div>
+          <div class="terminal" style="min-height:auto;padding:8px 12px">${data.receipt_path}</div>
           <div class="code-btn-group">
             <button class="copy-btn" style="color:var(--accent);border-color:rgba(88,166,255,0.3)"
                     data-action="open-file" data-file-path="${data.receipt_path.replace(/"/g,'&quot;')}">⊞ Open</button>
@@ -1557,15 +1595,20 @@ bash launch.sh</div>
       }
     }
 
-    // Footer buttons — Uninstall (all installed tools) + Remove (user packages only)
+    // Footer buttons — Install / Uninstall / Remove (user packages only)
     const uninstallBtn = document.getElementById('receipt-uninstall-btn');
+    const installBtn   = document.getElementById('receipt-install-btn');
     const deleteBtn    = document.getElementById('receipt-delete-btn');
 
     if (data.installed) {
       uninstallBtn.style.display = '';
       uninstallBtn.onclick = () => { closeModal('receipt-modal'); confirmUninstall(data.id, data.name); };
+      installBtn.style.display = 'none';
     } else {
       uninstallBtn.style.display = 'none';
+      installBtn.style.display = '';
+      installBtn.textContent = '↓ Install';
+      installBtn.onclick = () => { closeModal('receipt-modal'); installTool(data.id, data.name, false); };
     }
 
     if (isUser) {
@@ -1658,6 +1701,15 @@ bash launch.sh</div>
       }
     }
 
+    // Check button
+    const checkBtn = document.getElementById('receipt-check-btn');
+    checkBtn.style.display = '';
+    checkBtn.onclick = () => {
+      const cmd = (data.check_cmd || '').trim();
+      _showCheckPanel(data.id, cmd, true);
+      if (!cmd) setTimeout(() => { const i = document.getElementById('check-cmd-input'); if(i) i.focus(); }, 0);
+    };
+
     // Attach copy buttons to .terminal blocks that don't already have them
     initCopyButtons(body);
 
@@ -1684,6 +1736,103 @@ bash launch.sh</div>
     });
   }
 
+  // ---------------------------------------------------------------------------
+  // Tool check / version probe
+  // ---------------------------------------------------------------------------
+  let _checkEvtSource = null;
+
+  function _stopCheck() {
+    if (_checkEvtSource) { _checkEvtSource.close(); _checkEvtSource = null; }
+  }
+
+  function _showCheckPanel(toolId, defaultCmd, autoRun) {
+    const body = document.getElementById('receipt-modal-body');
+    const existing = document.getElementById('check-panel');
+    if (existing) { existing.remove(); _stopCheck(); }
+
+    const panel = document.createElement('div');
+    panel.id = 'check-panel';
+    const safeCmd = (defaultCmd || '').replace(/"/g, '&quot;');
+    panel.innerHTML = `
+      <div style="border-top:1px solid var(--border);padding-top:12px;margin-top:12px">
+        <div style="font-size:11px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">Version / Status Check</div>
+        <div style="display:flex;gap:8px;margin-bottom:8px">
+          <input id="check-cmd-input" type="text" value="${safeCmd}"
+                 placeholder="e.g. cmake --version"
+                 style="flex:1;background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:4px;font-family:monospace;font-size:12px;outline:none">
+          <button class="btn btn-primary" id="check-run-btn" style="white-space:nowrap">▷ Run</button>
+        </div>
+        <div style="position:relative">
+          <div class="terminal" id="check-output" style="min-height:56px;display:none"></div>
+          <button id="check-copy-btn" style="display:none;position:absolute;top:6px;right:6px" class="copy-btn">⎘ Copy</button>
+        </div>
+      </div>`;
+    body.appendChild(panel);
+    body.scrollTop = body.scrollHeight;
+
+    document.getElementById('check-run-btn').addEventListener('click', () => _runCheck(toolId));
+    document.getElementById('check-cmd-input').addEventListener('keydown', e => {
+      if (e.key === 'Enter') _runCheck(toolId);
+    });
+
+    if (autoRun) _runCheck(toolId);
+  }
+
+  function _runCheck(toolId) {
+    const input  = document.getElementById('check-cmd-input');
+    const output = document.getElementById('check-output');
+    const runBtn = document.getElementById('check-run-btn');
+    if (!input || !output || !runBtn) return;
+
+    const cmd = input.value.trim();
+    _stopCheck();
+
+    const copyBtn = document.getElementById('check-copy-btn');
+    output.style.display = '';
+    output.innerHTML = '';
+    if (copyBtn) copyBtn.style.display = 'none';
+    runBtn.disabled = true;
+    runBtn.textContent = '…';
+
+    const url = `/check/${toolId}` + (cmd ? `?cmd=${encodeURIComponent(cmd)}` : '');
+    _checkEvtSource = new EventSource(url);
+
+    _checkEvtSource.onmessage = function(e) {
+      const line = e.data;
+      if (line.startsWith('DONE:')) {
+        _stopCheck();
+        runBtn.disabled = false;
+        runBtn.textContent = '▷ Run';
+        const copyBtn = document.getElementById('check-copy-btn');
+        if (copyBtn && output.textContent.trim()) {
+          copyBtn.style.display = '';
+          copyBtn.onclick = () => {
+            navigator.clipboard.writeText(output.textContent).then(() => {
+              copyBtn.textContent = '✓ Copied';
+              setTimeout(() => { copyBtn.textContent = '⎘ Copy'; }, 2000);
+            });
+          };
+        }
+        return;
+      }
+      const span = document.createElement('span');
+      span.className = 'terminal-line';
+      if (line.startsWith('✓')) span.classList.add('ok');
+      else if (line.startsWith('✗') || line.startsWith('ERROR')) span.classList.add('err');
+      else if (line.startsWith('$')) span.style.color = 'var(--text2)';
+      else if (line.startsWith('#')) span.style.cssText = 'color:var(--text2);opacity:0.6;font-style:italic';
+      span.textContent = line;
+      output.appendChild(span);
+      output.appendChild(document.createTextNode('\n'));
+      output.scrollTop = output.scrollHeight;
+    };
+    _checkEvtSource.onerror = function() {
+      _stopCheck();
+      runBtn.disabled = false;
+      runBtn.textContent = '▷ Run';
+    };
+  }
+
   async function _openFile(path) {
     try {
       const r = await fetch('/open-file?path=' + encodeURIComponent(path));
@@ -1692,6 +1841,129 @@ bash launch.sh</div>
     } catch (e) {
       showToast(String(e), 'error');
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Fix PATH modal
+  // ---------------------------------------------------------------------------
+  let _fixPathEvt = null;
+
+  async function openFixPathModal() {
+    const body = document.getElementById('fix-path-modal-body');
+    const applyBtn = document.getElementById('fix-path-apply-btn');
+    body.innerHTML = '<div style="color:var(--text2);font-size:12px;padding:20px 0;text-align:center">Scanning installed tools…</div>';
+    applyBtn.style.display = 'none';
+    openModal('fix-path-modal');
+
+    let data;
+    try {
+      const r = await fetch('/api/path-status');
+      data = await r.json();
+    } catch (e) {
+      body.innerHTML = `<div style="color:var(--red);font-size:12px">✗ ${e}</div>`;
+      return;
+    }
+
+    const needsFix = data.entries.filter(e => !e.has_priority);
+    const good     = data.entries.filter(e => e.has_priority);
+    const os = data.os;
+
+    let html = `<div style="font-size:12px;color:var(--text2);line-height:1.6;margin-bottom:14px">`;
+    if (os === 'windows') {
+      html += `Moves devkit tool directories to the <strong style="color:var(--text)">front of user PATH</strong> in the Windows registry. Also writes a <code>devkit-env.cmd</code> batch file and registers it in <strong style="color:var(--text)">CMD AutoRun</strong> so devkit tools override system PATH entries in CMD too (user PATH is always appended after system PATH in CMD; AutoRun fires before any command runs). No admin required.`;
+      if (data.cmd_autorun_set) {
+        html += `<div style="margin-top:8px;color:var(--green);font-size:11px">✓ CMD AutoRun is already configured.</div>`;
+      } else {
+        html += `<div style="margin-top:8px;color:var(--yellow);font-size:11px">⚠ CMD AutoRun not yet set — applying will fix cmake/gcc/etc. discrepancies between CMD and Git Bash.</div>`;
+      }
+    } else {
+      html += `Writes devkit tool directories to <strong style="color:var(--text)">~/.bashrc</strong> before system paths. Run <code>source ~/.bashrc</code> or open a new terminal to pick up the change.`;
+    }
+    html += `</div>`;
+
+    const notOnPath  = needsFix.filter(e => !e.on_path);
+    const notFirst   = needsFix.filter(e => e.on_path && !e.has_priority);
+
+    if (notOnPath.length) {
+      html += `<div style="font-size:11px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">Will be added (${notOnPath.length})</div>`;
+      html += `<div style="margin-bottom:14px">` + notOnPath.map(e =>
+        `<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--border)">
+          <span style="color:var(--green);font-size:11px">+</span>
+          <div><div style="font-size:12px">${e.tool}</div><div style="font-size:10px;color:var(--text2);word-break:break-all">${e.path}</div></div>
+        </div>`
+      ).join('') + `</div>`;
+    }
+
+    if (notFirst.length) {
+      html += `<div style="font-size:11px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">On PATH but shadowed by system install — will be promoted (${notFirst.length})</div>`;
+      html += `<div style="margin-bottom:14px">` + notFirst.map(e =>
+        `<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--border)">
+          <span style="color:var(--yellow);font-size:11px">^</span>
+          <div><div style="font-size:12px">${e.tool}</div><div style="font-size:10px;color:var(--text2);word-break:break-all">${e.path}</div></div>
+        </div>`
+      ).join('') + `</div>`;
+    }
+
+    if (good.length) {
+      html += `<div style="font-size:11px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">Already first in PATH (${good.length})</div>`;
+      html += `<div style="margin-bottom:14px">` + good.map(e =>
+        `<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--border)">
+          <span style="color:var(--text2);font-size:11px">✓</span>
+          <div><div style="font-size:12px;color:var(--text2)">${e.tool}</div><div style="font-size:10px;color:var(--text2);opacity:0.6;word-break:break-all">${e.path}</div></div>
+        </div>`
+      ).join('') + `</div>`;
+    }
+
+    if (!data.entries.length) {
+      html += `<div style="color:var(--yellow);font-size:12px">⚠ No installed devkit tools found. Install some tools first.</div>`;
+    }
+
+    html += `<div class="terminal" id="fix-path-output" style="display:none;margin-top:10px"></div>`;
+    body.innerHTML = html;
+
+    if (needsFix.length) {
+      applyBtn.style.display = '';
+      applyBtn.disabled = false;
+      const label = notFirst.length && !notOnPath.length ? `^ Promote ${notFirst.length} to front` :
+                    notOnPath.length && !notFirst.length ? `⚡ Add ${notOnPath.length} to PATH` :
+                    `⚡ Fix ${needsFix.length} PATH entries`;
+      applyBtn.textContent = label;
+    }
+  }
+
+  function runFixPath() {
+    const output = document.getElementById('fix-path-output');
+    const applyBtn = document.getElementById('fix-path-apply-btn');
+    if (!output) return;
+    if (_fixPathEvt) { _fixPathEvt.close(); _fixPathEvt = null; }
+
+    output.style.display = '';
+    output.innerHTML = '';
+    applyBtn.disabled = true;
+    applyBtn.textContent = '…';
+
+    _fixPathEvt = new EventSource('/fix-path');
+    _fixPathEvt.onmessage = function(e) {
+      const line = e.data;
+      if (line.startsWith('DONE:')) {
+        _fixPathEvt.close(); _fixPathEvt = null;
+        const ok = line === 'DONE:success';
+        applyBtn.style.display = 'none';
+        showToast(ok ? '✓ PATH updated — open a new terminal' : '✗ PATH update failed', ok ? 'success' : 'error');
+        return;
+      }
+      const span = document.createElement('span');
+      span.className = 'terminal-line';
+      if (line.startsWith('✓') || line.startsWith('+')) span.classList.add('ok');
+      else if (line.startsWith('✗')) span.classList.add('err');
+      else if (line.startsWith('^')) span.style.color = 'var(--yellow)';
+      else if (line.startsWith('(already')) span.style.color = 'var(--text2)';
+      span.textContent = line;
+      output.appendChild(span);
+      output.appendChild(document.createTextNode('\n'));
+      output.scrollTop = output.scrollHeight;
+    };
+    _fixPathEvt.onerror = () => { if (_fixPathEvt) { _fixPathEvt.close(); _fixPathEvt = null; } applyBtn.disabled = false; applyBtn.textContent = '⚡ Retry'; };
   }
 
   // ---------------------------------------------------------------------------

@@ -32,8 +32,11 @@ from airgap_devkit.connectivity import detect_mode
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
-APP_DIR = Path(__file__).parent    # .../airgap-devkit-manager/app/
-REPO_ROOT = APP_DIR.parent.parent  # app/ -> airgap-devkit-manager/ -> repo root
+APP_DIR = Path(__file__).parent    # .../manager/src/airgap_devkit/
+# If launched via launch.sh, DEVKIT_TOOLS_ROOT=<repo>/tools is set; derive repo root from it.
+# Fallback: go up one extra level for standalone/pip-installed use.
+_env_tools = os.environ.get("DEVKIT_TOOLS_ROOT")
+REPO_ROOT = Path(_env_tools).parent if _env_tools else APP_DIR.parent.parent.parent
 TEMPLATES_DIR = APP_DIR / "templates"
 STATIC_DIR = APP_DIR / "static"
 USER_PACKAGES_DIR = REPO_ROOT / "user-packages"
@@ -84,6 +87,15 @@ def _to_bash_path(p: Path) -> str:
     if OS == "windows":
         return str(p).replace("\\", "/")
     return str(p)
+
+
+def _to_posix_bash_path(p: Path) -> str:
+    """Convert a Windows absolute path to POSIX form for use inside a bash command string.
+    E.g. C:\\Users\\foo\\bar -> /c/Users/foo/bar  (needed for inline PATH= assignments in bash -c)."""
+    s = str(p).replace("\\", "/")
+    if OS == "windows" and len(s) >= 2 and s[1] == ":":
+        s = "/" + s[0].lower() + s[2:]
+    return s
 
 
 def _detect_privilege() -> str:
@@ -187,6 +199,7 @@ def _load_tools() -> list:
             data.setdefault("setup_args", [])
             data.setdefault("version", "")
             data.setdefault("version_label", None)
+            data.setdefault("check_cmd", None)
             tools.append(data)
     tools.sort(key=lambda t: (t.get("sort_order", 99), t.get("category", ""), t.get("name", "")))
     return tools
@@ -231,8 +244,8 @@ PROFILES = {
 # Prebuilt-binaries submodule detection
 # ---------------------------------------------------------------------------
 def get_submodule_status() -> dict:
-    """Check whether the prebuilt-binaries submodule is initialised and up to date."""
-    submodule_dir = REPO_ROOT / "prebuilt-binaries"
+    """Check whether the prebuilt submodule is initialised and up to date."""
+    submodule_dir = REPO_ROOT / "prebuilt"
     result = {
         "initialized": False,
         "stale": False,       # True if submodule pointer is ahead/behind
@@ -257,7 +270,7 @@ def get_submodule_status() -> dict:
     # Ask git for the submodule status line
     try:
         proc = subprocess.run(
-            ["git", "-C", str(REPO_ROOT), "submodule", "status", "prebuilt-binaries"],
+            ["git", "-C", str(REPO_ROOT), "submodule", "status", "prebuilt"],
             capture_output=True, text=True, timeout=5,
         )
         line = proc.stdout.strip()
@@ -506,12 +519,12 @@ async def api_submodule():
 
 @app.post("/init-submodule")
 async def init_submodule():
-    """Stream output of git submodule update --init --recursive prebuilt-binaries."""
+    """Stream output of git submodule update --init --recursive prebuilt."""
     async def stream():
-        yield "data: Initialising prebuilt-binaries submodule...\n\n"
+        yield "data: Initialising prebuilt submodule...\n\n"
         cmd = [
             "git", "-C", str(REPO_ROOT),
-            "submodule", "update", "--init", "--recursive", "prebuilt-binaries",
+            "submodule", "update", "--init", "--recursive", "prebuilt",
         ]
         try:
             proc = await asyncio.create_subprocess_exec(
@@ -525,7 +538,7 @@ async def init_submodule():
                     yield f"data: {text}\n\n"
             await proc.wait()
             if proc.returncode == 0:
-                yield "data: ✓ prebuilt-binaries initialised successfully\n\n"
+                yield "data: ✓ prebuilt initialised successfully\n\n"
                 yield "data: DONE:success\n\n"
             else:
                 yield f"data: ✗ git exited with code {proc.returncode}\n\n"
@@ -1026,6 +1039,102 @@ async def packages_finalize(request: Request):
     return {"ok": True, "id": tool_id, "name": name}
 
 
+@app.get("/check/{tool_id:path}")
+async def check_tool(tool_id: str, cmd: Optional[str] = None):
+    """SSE: run a version-check or user-supplied command against an installed tool."""
+    tool = next((t for t in TOOLS if t["id"] == tool_id), None)
+    if not tool:
+        return JSONResponse({"error": "Tool not found"}, status_code=404)
+
+    run_cmd = (cmd or "").strip() or (tool.get("check_cmd") or "").strip()
+    receipt_name = tool.get("receipt_name", tool_id)
+    prefix = _current_prefix()
+    tool_bin = prefix / receipt_name / "bin"
+    tool_dir = prefix / receipt_name
+
+    async def stream():
+        if not run_cmd:
+            receipt_path = _get_receipt_path(receipt_name)
+            if receipt_path.exists():
+                try:
+                    for line in receipt_path.read_text(encoding="utf-8", errors="replace").splitlines():
+                        if line.strip():
+                            yield f"data: {line}\n\n"
+                except Exception as e:
+                    yield f"data: ERROR reading receipt: {e}\n\n"
+                yield "data: DONE:success\n\n"
+            else:
+                yield "data: ✗ No check command configured and no install receipt found.\n\n"
+                yield "data: DONE:failed\n\n"
+            return
+
+        # For simple commands (no shell operators) search for the executable
+        # directly in the tool's install dirs and invoke it as a native subprocess —
+        # no bash PATH translation needed at all, which avoids all POSIX/Windows path
+        # conversion issues.  Complex commands (pipes, &&, etc.) fall back to bash
+        # with the tool dirs prepended to PATH using the OS-native separator.
+        _SHELL_OPS = ('|', '&&', '||', ';', '`', '$(', '>', '<')
+        is_simple = not any(op in run_cmd for op in _SHELL_OPS)
+
+        def _find_exe_path(name: str) -> Optional[Path]:
+            suffixes = [".exe", ""] if OS == "windows" else [""]
+            for search_dir in [tool_bin, tool_dir]:
+                for suf in suffixes:
+                    c = search_dir / (name + suf)
+                    if c.exists():
+                        return c
+            return None
+
+        yield f"data: $ {run_cmd}\n\n"
+        try:
+            if is_simple:
+                import shlex as _shlex
+                parts = _shlex.split(run_cmd)
+                resolved = _find_exe_path(parts[0]) if parts else None
+                exec_argv = [str(resolved) if resolved else parts[0]] + parts[1:]
+                if resolved:
+                    yield f"data: # {resolved}\n\n"
+                else:
+                    import shutil as _shutil_w
+                    sys_path = _shutil_w.which(parts[0]) if parts else None
+                    yield f"data: # not in devkit prefix — using PATH: {sys_path or parts[0]}\n\n"
+                proc = await asyncio.create_subprocess_exec(
+                    *exec_argv,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.STDOUT,
+                )
+            else:
+                env = os.environ.copy()
+                extras = []
+                if tool_bin.exists(): extras.append(str(tool_bin))
+                if tool_dir.exists(): extras.append(str(tool_dir))
+                if extras:
+                    sep = ";" if OS == "windows" else ":"
+                    env["PATH"] = sep.join(extras) + sep + env.get("PATH", "")
+                proc = await asyncio.create_subprocess_exec(
+                    "bash", "-c", run_cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.STDOUT,
+                    cwd=_to_bash_path(REPO_ROOT),
+                    env=env,
+                )
+            async for line in proc.stdout:
+                text = line.decode("utf-8", errors="replace").rstrip()
+                if text:
+                    yield f"data: {text}\n\n"
+            await proc.wait()
+            if proc.returncode == 0:
+                yield "data: DONE:success\n\n"
+            else:
+                yield f"data: ✗ exit {proc.returncode}\n\n"
+                yield "data: DONE:failed\n\n"
+        except Exception as e:
+            yield f"data: ERROR: {e}\n\n"
+            yield "data: DONE:failed\n\n"
+
+    return StreamingResponse(stream(), media_type="text/event-stream")
+
+
 @app.delete("/packages/staging/{staging_id}")
 async def cancel_staging(staging_id: str):
     """Clean up a preflight staging directory when the user cancels the wizard."""
@@ -1400,5 +1509,275 @@ async def updates_vscode_extensions(ext_id: Optional[str] = None, all: bool = Fa
         yield "data:      generated manifest-new.json entries.\n\n"
         yield "data:   4. Run the VS Code Extensions install from this dashboard.\n\n"
         yield "data: DONE:failed\n\n"
+
+    return StreamingResponse(stream(), media_type="text/event-stream")
+
+
+# ---------------------------------------------------------------------------
+# PATH management
+# ---------------------------------------------------------------------------
+
+def _devkit_bin_dirs() -> list[tuple[str, Path]]:
+    """Return (tool_name, bin_dir) for every installed tool that has a bin dir."""
+    prefix = _current_prefix()
+    seen: set[Path] = set()
+    result: list[tuple[str, Path]] = []
+    for tool in TOOLS:
+        receipt_path = _get_receipt_path(tool["receipt_name"])
+        if _parse_receipt(receipt_path).get("status") != "success":
+            continue
+        tool_dir = prefix / tool["receipt_name"]
+        for candidate in [tool_dir / "bin", tool_dir]:
+            if candidate in seen or not candidate.exists():
+                continue
+            # Only include dirs that actually contain executables
+            suffixes = {".exe"} if OS == "windows" else set()
+            has_exe = any(
+                f.is_file() and (not suffixes or f.suffix.lower() in suffixes)
+                for f in candidate.iterdir()
+            )
+            if has_exe:
+                seen.add(candidate)
+                result.append((tool["name"], candidate))
+                break
+    return result
+
+
+def _read_user_path_win() -> str:
+    """Read the persistent user PATH from the Windows registry."""
+    import winreg
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment",
+                            0, winreg.KEY_READ) as key:
+            val, _ = winreg.QueryValueEx(key, "PATH")
+            return val or ""
+    except FileNotFoundError:
+        return ""
+
+
+def _write_user_path_win(new_path: str) -> None:
+    """Write the user PATH to the Windows registry and broadcast the change."""
+    import winreg, ctypes
+    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment",
+                        0, winreg.KEY_SET_VALUE) as key:
+        winreg.SetValueEx(key, "PATH", 0, winreg.REG_EXPAND_SZ, new_path)
+    # Notify running programs (Explorer, etc.) of the change
+    HWND_BROADCAST, WM_SETTINGCHANGE = 0xFFFF, 0x001A
+    ctypes.windll.user32.SendMessageTimeoutW(
+        HWND_BROADCAST, WM_SETTINGCHANGE, 0, "Environment", 2, 5000, None
+    )
+
+
+@app.get("/api/path-status", response_class=JSONResponse)
+async def api_path_status():
+    """Return which devkit bin dirs are already at the front of the user PATH."""
+    bins = _devkit_bin_dirs()
+    if OS == "windows":
+        try:
+            current = _read_user_path_win()
+        except Exception:
+            current = os.environ.get("PATH", "")
+    else:
+        current = os.environ.get("PATH", "")
+
+    path_sep = ";" if OS == "windows" else ":"
+    path_parts = [p.lower().rstrip("\\/") for p in current.split(path_sep) if p.strip()]
+    prefix_lower = str(_current_prefix()).lower().rstrip("\\/")
+
+    entries = []
+    needs_fix = False
+    for name, d in bins:
+        d_str = str(d)
+        d_lower = d_str.lower().rstrip("\\/")
+        on_path = d_lower in path_parts
+        if on_path:
+            idx = path_parts.index(d_lower)
+            # Priority = no non-devkit dirs appear before this one
+            has_priority = all(p.startswith(prefix_lower) for p in path_parts[:idx] if p)
+        else:
+            has_priority = False
+        if not has_priority:
+            needs_fix = True
+        entries.append({"tool": name, "path": d_str, "on_path": on_path, "has_priority": has_priority})
+
+    cmd_autorun_set = False
+    if OS == "windows":
+        try:
+            import winreg as _winreg
+            with _winreg.OpenKey(_winreg.HKEY_CURRENT_USER,
+                                 r"Software\Microsoft\Command Processor",
+                                 0, _winreg.KEY_READ) as key:
+                val, _ = _winreg.QueryValueEx(key, "AutoRun")
+                cmd_autorun_set = "devkit-env.cmd" in (val or "")
+        except Exception:
+            pass
+
+    return {"entries": entries, "needs_fix": needs_fix,
+            "os": OS, "prefix": str(_current_prefix()),
+            "cmd_autorun_set": cmd_autorun_set}
+
+
+@app.get("/fix-path")
+async def fix_path():
+    """SSE: prepend devkit tool bin dirs to the user PATH (registry on Windows, .bashrc on Linux)."""
+    async def stream():
+        bins = _devkit_bin_dirs()
+        if not bins:
+            yield "data: ✗ No installed devkit tools found — install some tools first.\n\n"
+            yield "data: DONE:failed\n\n"
+            return
+
+        if OS == "windows":
+            try:
+                current = _read_user_path_win()
+            except Exception as exc:
+                yield f"data: ✗ Cannot read user PATH from registry: {exc}\n\n"
+                yield "data: DONE:failed\n\n"
+                return
+
+            devkit_strs = [str(d) for _, d in bins]
+            devkit_lower = {s.lower().rstrip("\\/"): s for s in devkit_strs}
+
+            # Strip devkit dirs from current PATH; they'll be prepended at the front
+            remaining = [p for p in current.split(";")
+                         if p.strip() and p.lower().rstrip("\\/") not in devkit_lower]
+
+            prefix_lower = str(_current_prefix()).lower().rstrip("\\/")
+            path_parts = [p.lower().rstrip("\\/") for p in current.split(";") if p.strip()]
+
+            promoted: list[str] = []
+            added: list[str] = []
+            already_first: list[str] = []
+
+            for name, d in bins:
+                d_str = str(d)
+                d_lower = d_str.lower().rstrip("\\/")
+                if d_lower in path_parts:
+                    idx = path_parts.index(d_lower)
+                    has_priority = all(p.startswith(prefix_lower) for p in path_parts[:idx] if p)
+                    if has_priority:
+                        already_first.append(f"  (already first) {name}: {d_str}")
+                    else:
+                        promoted.append(d_str)
+                        yield f"data: ^ {name}: promoted to front\n\n"
+                else:
+                    added.append(d_str)
+                    yield f"data: + {name}: {d_str}\n\n"
+
+            for msg in already_first:
+                yield f"data: {msg}\n\n"
+
+            if not promoted and not added:
+                # PATH is already correct; still ensure CMD AutoRun is set
+                prefix = _current_prefix()
+                env_cmd = prefix / "devkit-env.cmd"
+                try:
+                    import winreg as _winreg
+                    with _winreg.OpenKey(_winreg.HKEY_CURRENT_USER,
+                                         r"Software\Microsoft\Command Processor",
+                                         0, _winreg.KEY_READ) as key:
+                        val, _ = _winreg.QueryValueEx(key, "AutoRun")
+                        already_autorun = "devkit-env.cmd" in (val or "")
+                except Exception:
+                    already_autorun = False
+                yield "data: \n\n"
+                if already_autorun:
+                    yield "data: ✓ All devkit tool directories are already first in your PATH.\n\n"
+                    yield "data: ✓ CMD AutoRun is already configured.\n\n"
+                else:
+                    yield "data: ✓ All devkit tool directories are already first in user PATH.\n\n"
+                    yield "data: ⚠ CMD AutoRun not yet set — applying fix...\n\n"
+                    set_lines = "\n".join(f'set "PATH={d};%PATH%"' for d in reversed(devkit_strs))
+                    env_cmd_text = (
+                        "@echo off\n"
+                        "rem airgap-devkit PATH — auto-generated, do not edit\n"
+                        f"{set_lines}\n"
+                    )
+                    try:
+                        env_cmd.parent.mkdir(parents=True, exist_ok=True)
+                        env_cmd.write_text(env_cmd_text, encoding="utf-8")
+                        with _winreg.OpenKey(_winreg.HKEY_CURRENT_USER,
+                                             r"Software\Microsoft\Command Processor",
+                                             0, _winreg.KEY_SET_VALUE) as key:
+                            autorun = f'@if exist "{env_cmd}" call "{env_cmd}"'
+                            _winreg.SetValueEx(key, "AutoRun", 0, _winreg.REG_SZ, autorun)
+                        yield "data: ✓ CMD AutoRun set — open a new CMD to pick up the change.\n\n"
+                    except Exception as exc:
+                        yield f"data: ⚠ CMD AutoRun not set: {exc}\n\n"
+                yield "data: DONE:success\n\n"
+                return
+
+            new_path = ";".join(devkit_strs) + (";" + ";".join(remaining) if remaining else "")
+            try:
+                _write_user_path_win(new_path)
+            except Exception as exc:
+                yield f"data: ✗ Failed to write registry: {exc}\n\n"
+                yield "data: DONE:failed\n\n"
+                return
+
+            # Write devkit-env.cmd and register it in CMD AutoRun so devkit bins
+            # take priority even over system PATH entries (user PATH is always
+            # appended after system PATH in CMD; AutoRun fires before any command).
+            prefix = _current_prefix()
+            env_cmd = prefix / "devkit-env.cmd"
+            set_lines = "\n".join(f'set "PATH={d};%PATH%"' for d in reversed(devkit_strs))
+            env_cmd_text = (
+                "@echo off\n"
+                "rem airgap-devkit PATH — auto-generated, do not edit\n"
+                f"{set_lines}\n"
+            )
+            try:
+                env_cmd.parent.mkdir(parents=True, exist_ok=True)
+                env_cmd.write_text(env_cmd_text, encoding="utf-8")
+                import winreg as _winreg
+                cmd_key = r"Software\Microsoft\Command Processor"
+                with _winreg.OpenKey(_winreg.HKEY_CURRENT_USER, cmd_key,
+                                     0, _winreg.KEY_SET_VALUE) as key:
+                    autorun = f'@if exist "{env_cmd}" call "{env_cmd}"'
+                    _winreg.SetValueEx(key, "AutoRun", 0, _winreg.REG_SZ, autorun)
+                yield f"data: ✓ CMD AutoRun set — devkit overrides system PATH in CMD too.\n\n"
+            except Exception as exc:
+                yield f"data: ⚠ CMD AutoRun not set: {exc}\n\n"
+
+            n_changed = len(promoted) + len(added)
+            yield "data: \n\n"
+            yield f"data: ✓ {n_changed} director{'y' if n_changed==1 else 'ies'} set to front of user PATH.\n\n"
+            yield "data: ✓ Open a new terminal (CMD / PowerShell / Git Bash) to pick up the change.\n\n"
+            yield "data: DONE:success\n\n"
+
+        else:
+            # Linux: append export lines to ~/.bashrc
+            bashrc = Path.home() / ".bashrc"
+            marker_start = "# >>> airgap-devkit PATH >>>"
+            marker_end   = "# <<< airgap-devkit PATH <<<"
+            try:
+                existing = bashrc.read_text(encoding="utf-8") if bashrc.exists() else ""
+            except Exception as exc:
+                yield f"data: ✗ Cannot read ~/.bashrc: {exc}\n\n"
+                yield "data: DONE:failed\n\n"
+                return
+
+            # Strip previous devkit block
+            import re as _re
+            cleaned = _re.sub(
+                rf"{_re.escape(marker_start)}.*?{_re.escape(marker_end)}\n?",
+                "", existing, flags=_re.DOTALL
+            )
+
+            exports = "\n".join(f'export PATH="{d}:$PATH"' for _, d in bins)
+            block = f"\n{marker_start}\n{exports}\n{marker_end}\n"
+
+            try:
+                bashrc.write_text(cleaned.rstrip("\n") + block, encoding="utf-8")
+            except Exception as exc:
+                yield f"data: ✗ Cannot write ~/.bashrc: {exc}\n\n"
+                yield "data: DONE:failed\n\n"
+                return
+
+            for name, d in bins:
+                yield f"data: + {name}: {d}\n\n"
+            yield "data: \n\n"
+            yield "data: ✓ ~/.bashrc updated. Run:  source ~/.bashrc  or open a new terminal.\n\n"
+            yield "data: DONE:success\n\n"
 
     return StreamingResponse(stream(), media_type="text/event-stream")
