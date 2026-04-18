@@ -1504,6 +1504,20 @@ bash launch.sh</div>
     setInstallStatus('Starting…', true);
     openModal('install-modal');
 
+    const logLines = [];
+    const logStarted = new Date().toISOString();
+
+    function _saveLog(status) {
+      try {
+        localStorage.setItem('install_log_' + toolId, JSON.stringify({
+          toolName, status,
+          startedAt: logStarted,
+          completedAt: new Date().toISOString(),
+          lines: logLines
+        }));
+      } catch(e) {}
+    }
+
     const url = `/install/${toolId}${rebuild ? '?rebuild=true' : ''}`;
     const evtSource = new EventSource(url);
 
@@ -1520,29 +1534,45 @@ bash launch.sh</div>
             pathEvt.onmessage = function(pe) {
               if (pe.data.startsWith('DONE:')) {
                 pathEvt.close();
+                _saveLog('success');
                 setInstallStatus('✓ Complete', false);
                 showToast('✓ ' + toolName + ' installed', 'success');
               } else {
+                logLines.push(pe.data);
                 appendInstallLine(output, pe.data);
               }
             };
-            pathEvt.onerror = () => { pathEvt.close(); setInstallStatus('✓ Complete', false); showToast('✓ ' + toolName + ' installed', 'success'); };
+            pathEvt.onerror = () => { pathEvt.close(); _saveLog('success'); setInstallStatus('✓ Complete', false); showToast('✓ ' + toolName + ' installed', 'success'); };
           } else {
+            _saveLog('success');
             setInstallStatus('✓ Complete', false);
             showToast('✓ ' + toolName + ' installed', 'success');
           }
         } else {
+          _saveLog('failed');
           setInstallStatus('✗ Failed', false);
           showToast('✗ ' + toolName + ' failed', 'error');
         }
         return;
       }
+      logLines.push(line);
       appendInstallLine(output, line);
     };
     evtSource.onerror = function() {
       evtSource.close();
+      _saveLog('error');
       setInstallStatus('Connection closed', false);
     };
+  }
+
+  function _logLineHtml(line) {
+    let cls = '';
+    if (line.includes('[OK]') || line.includes('SUCCESS') || line.startsWith('✓') || line.includes('installed to')) cls = 'ok';
+    else if (line.includes('[!!]') || line.includes('ERROR') || line.includes('FAIL') || line.startsWith('✗')) cls = 'err';
+    else if (line.includes('[--]') || line.includes('Skipped') || line.includes('SKIP')) cls = 'warn';
+    else if (line.includes('[install-mode]') || line.includes('Logging') || line.startsWith('==>')) cls = 'info';
+    const esc = line.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    return `<span class="terminal-line${cls ? ' terminal-line--' + cls : ''}" style="${cls === 'ok' ? 'color:var(--green)' : cls === 'err' ? 'color:var(--red)' : cls === 'warn' ? 'color:var(--yellow)' : cls === 'info' ? 'color:var(--accent)' : ''}">${esc}</span>`;
   }
 
   // ---------------------------------------------------------------------------
@@ -1674,6 +1704,26 @@ bash launch.sh</div>
         body.innerHTML += mHtml;
       }
     }
+
+    // Saved install log — persisted in localStorage across sessions
+    try {
+      const _saved = localStorage.getItem('install_log_' + data.id);
+      if (_saved) {
+        const _log = JSON.parse(_saved);
+        const _sc = _log.status === 'success' ? 'var(--green)' : _log.status === 'failed' ? 'var(--red)' : 'var(--yellow)';
+        const _si = _log.status === 'success' ? '✓' : _log.status === 'failed' ? '✗' : '⚠';
+        const _dt = new Date(_log.completedAt).toLocaleString();
+        const _linesHtml = _log.lines.map(_logLineHtml).join('\n');
+        body.innerHTML += `
+        <div style="border-top:1px solid var(--border);padding-top:10px;margin-top:10px">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+            <div style="font-size:11px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:0.5px">Last Install Output</div>
+            <span style="font-size:10px;color:${_sc}">${_si} ${_log.status}&nbsp;&nbsp;·&nbsp;&nbsp;${_dt}</span>
+          </div>
+          <div class="terminal" style="height:200px;font-size:11px;white-space:pre-wrap;overflow-y:auto">${_linesHtml}</div>
+        </div>`;
+      }
+    } catch(e) {}
 
     // Footer buttons — Install / Uninstall / Remove (user packages only)
     const uninstallBtn = document.getElementById('receipt-uninstall-btn');
