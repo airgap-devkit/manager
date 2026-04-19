@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import signal
 import threading
 import time
 import webbrowser
@@ -58,13 +59,23 @@ def main() -> None:
 
     import uvicorn
 
-    uvicorn.run(
-        "airgap_devkit.main:app",
-        host=host,
-        port=port,
-        reload=False,
-        log_level="warning",
-    )
+    # On Windows, MSYS2/Git Bash sends SIGBREAK (Ctrl+C) which Python may not
+    # handle by default. Register SIGBREAK → SIGINT so Ctrl+C always works.
+    if hasattr(signal, "SIGBREAK"):
+        signal.signal(signal.SIGBREAK, lambda *_: signal.raise_signal(signal.SIGINT))
+
+    try:
+        uvicorn.run(
+            "airgap_devkit.main:app",
+            host=host,
+            port=port,
+            reload=False,
+            log_level="warning",
+        )
+    except KeyboardInterrupt:
+        print("\n[airgap-devkit] Stopped.")
+    finally:
+        print("[airgap-devkit] Server shut down.")
 
 
 if __name__ == "__main__":

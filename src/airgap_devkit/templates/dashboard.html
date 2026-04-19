@@ -272,6 +272,13 @@
       border: 1px solid var(--border);
       padding: 2px 7px; border-radius: 20px; font-size: 10px;
     }
+    .badge-preinstalled {
+      display: inline-flex; align-items: center; gap: 4px;
+      background: rgba(210,153,34,0.12); color: var(--yellow);
+      border: 1px solid rgba(210,153,34,0.4);
+      padding: 2px 7px; border-radius: 20px; font-size: 10px; font-weight: 600;
+    }
+    .tool-card.pre-installed { border-left: 3px solid var(--yellow); }
     .badge-unavailable {
       display: inline-flex; align-items: center; gap: 4px;
       background: rgba(248,81,73,0.1); color: var(--red);
@@ -379,11 +386,60 @@
       white-space: pre-wrap;
       word-break: break-all;
     }
-    .terminal-line { display: block; }
+    .terminal-line { display: block; border-radius: 2px; }
     .terminal-line.ok   { color: var(--green); }
     .terminal-line.err  { color: var(--red); }
     .terminal-line.info { color: var(--accent); }
     .terminal-line.warn { color: var(--yellow); }
+    @keyframes line-flash {
+      0%   { background: rgba(88,166,255,0.18); }
+      60%  { background: rgba(88,166,255,0.07); }
+      100% { background: transparent; }
+    }
+    .terminal-line.new { animation: line-flash 1.1s ease-out forwards; }
+    /* Live pulse dot shown while install is streaming */
+    .terminal-live-dot {
+      display: inline-block; width: 7px; height: 7px;
+      border-radius: 50%; background: var(--accent);
+      animation: live-pulse 1s ease-in-out infinite;
+      margin-left: 6px; vertical-align: middle; flex-shrink: 0;
+    }
+    @keyframes live-pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50%       { opacity: 0.35; transform: scale(0.75); }
+    }
+    /* Clear button inside terminal header bars */
+    .terminal-bar {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 4px 6px 4px 10px;
+      background: rgba(255,255,255,0.03);
+      border: 1px solid var(--border); border-bottom: none;
+      border-radius: var(--radius) var(--radius) 0 0;
+      font-size: 10px; color: var(--text2);
+    }
+    .terminal-bar + .terminal { border-radius: 0 0 var(--radius) var(--radius); }
+    .clear-btn {
+      background: none; border: 1px solid transparent;
+      color: var(--text2); cursor: pointer; font-size: 10px;
+      padding: 2px 8px; border-radius: 3px; font-family: var(--font);
+      transition: color 0.15s, border-color 0.15s;
+    }
+    .clear-btn:hover { color: var(--yellow); border-color: rgba(210,153,34,0.4); }
+    /* Confirm panel option card */
+    .install-option-card {
+      display: flex; align-items: flex-start; gap: 12px;
+      padding: 14px 16px;
+      background: rgba(88,166,255,0.05);
+      border: 1px solid rgba(88,166,255,0.2);
+      border-radius: 8px;
+      cursor: pointer;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    .install-option-card:hover { border-color: rgba(88,166,255,0.45); background: rgba(88,166,255,0.09); }
+    .install-option-card input[type=checkbox] {
+      width: 16px; height: 16px; accent-color: var(--accent);
+      cursor: pointer; flex-shrink: 0; margin-top: 1px;
+    }
 
     /* Modal */
     .modal-overlay {
@@ -489,18 +545,19 @@
     .info-value.accent { color: var(--accent); }
 
     /* Universal copy-able code block */
-    .code-wrap { display: flex; flex-direction: column; gap: 4px; }
+    .code-wrap { display: flex; flex-direction: column; gap: 6px; }
     .code-wrap .terminal { overflow-x: auto; white-space: nowrap; }
     .code-btn-group {
-      display: flex; gap: 4px; align-items: center; justify-content: flex-end;
+      display: flex; gap: 6px; align-items: center; justify-content: flex-end;
+      padding: 2px 0 4px;
     }
     .copy-btn {
       background: rgba(33,38,45,0.95); border: 1px solid var(--border);
       color: var(--text2); cursor: pointer; font-size: 10px;
-      padding: 4px 12px; border-radius: 4px; font-family: var(--font);
-      transition: color 0.1s, border-color 0.1s; white-space: nowrap;
+      padding: 5px 14px; border-radius: 4px; font-family: var(--font);
+      transition: color 0.15s, border-color 0.15s, background 0.15s; white-space: nowrap;
     }
-    .copy-btn:hover { color: var(--text); border-color: var(--accent); }
+    .copy-btn:hover { color: var(--text); border-color: var(--accent); background: rgba(88,166,255,0.06); }
 
     /* Filter bar */
     .filter-bar {
@@ -791,6 +848,7 @@
         <button class="btn" id="fix-path-btn" onclick="openFixPathModal()" title="Prepend devkit tool binaries to your user PATH so they take priority over system tools">⚡ Fix PATH</button>
         <button class="btn" onclick="openModal('upload-modal')" title="Upload a custom tool package">⬆ Add Package</button>
         <button class="btn" id="check-updates-btn" onclick="openUpdatesModal()" title="Check for updates (requires internet)"{% if mode == 'airgapped' %} style="display:none"{% endif %}>↑ Check Updates</button>
+        <button class="btn btn-danger" onclick="confirmShutdown()" title="Stop the DevKit server process" style="margin-left:8px">⏻ Exit</button>
         <button class="btn btn-primary" onclick="showProfileModal('cpp-dev')">▷ Install Profile</button>
       </div>
     </div>
@@ -883,9 +941,10 @@
     </div>
     <div class="tool-grid" style="margin-bottom:28px">
       {% for tool in cat_tools %}
-      <div class="tool-card {% if tool.installed %}installed{% endif %} {% if not tool.available %}not-available{% endif %}"
+      <div class="tool-card {% if tool.installed %}installed{% elif tool.sys_found %}pre-installed{% endif %} {% if not tool.available %}not-available{% endif %}"
            data-category="{{ tool.category }}"
            data-installed="{{ 'installed' if tool.installed else 'not-installed' }}"
+           data-sys-found="{{ 'true' if tool.sys_found else 'false' }}"
            id="tool-card-{{ tool.id | replace('/', '-') }}">
         <div class="tool-card-header">
           <div>
@@ -905,6 +964,10 @@
               <span class="badge-installed">
                 <span class="dot dot-green"></span>
                 Installed
+              </span>
+            {% elif tool.sys_found %}
+              <span class="badge-preinstalled" title="Found on system PATH at {{ tool.sys_path }}">
+                ⚡ Pre-installed
               </span>
             {% else %}
               <span class="badge-not-installed">
@@ -1036,22 +1099,49 @@
 <div class="modal-overlay" id="install-modal">
   <div class="modal">
     <div class="modal-header">
-      <div class="modal-title" id="install-modal-title">Installing...</div>
+      <div class="modal-title" id="install-modal-title">Install</div>
       <button class="modal-close" onclick="closeModal('install-modal')">×</button>
     </div>
-    <div class="modal-body" style="padding: 12px; overflow: hidden; display: flex; flex-direction: column; gap: 0;">
-      <div class="terminal" id="install-output" style="flex: 1; height: 100%; border-bottom: none; border-radius: var(--radius) var(--radius) 0 0;">Waiting...</div>
-      <div id="install-path-consent-row" style="padding:8px 10px;display:flex;align-items:center;gap:8px;border:1px solid var(--border);border-top:none;background:var(--bg2)">
-        <input type="checkbox" id="install-path-consent" checked style="width:13px;height:13px;accent-color:var(--accent);cursor:pointer;flex-shrink:0">
-        <label for="install-path-consent" style="font-size:11px;color:var(--text2);cursor:pointer;user-select:none">Update PATH environment variable after installation</label>
+    <div class="modal-body" style="padding: 0; overflow: hidden; display: flex; flex-direction: column; gap: 0;">
+
+      <!-- Confirm panel: shown before install starts -->
+      <div id="install-confirm-panel" style="padding:28px 20px 24px;display:flex;flex-direction:column;gap:20px;">
+        <div>
+          <div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:4px">Install Options</div>
+          <div style="font-size:11px;color:var(--text2)">Review and configure before the install begins.</div>
+        </div>
+        <label class="install-option-card" for="install-path-consent">
+          <input type="checkbox" id="install-path-consent" checked>
+          <div style="display:flex;flex-direction:column;gap:3px;flex:1">
+            <div style="font-size:12px;font-weight:600;color:var(--text)">Add to PATH after installation</div>
+            <div style="font-size:11px;color:var(--text2);line-height:1.5">
+              Registers this tool's bin directory in your user PATH so it's available in every terminal.
+              <span style="color:var(--accent);margin-left:4px">Recommended.</span>
+            </div>
+          </div>
+        </label>
       </div>
-      <div class="install-status-bar" id="install-status-bar">
-        <span class="spinner" id="install-spinner" style="display:none"></span>
-        <span class="status-text" id="install-status-text">—</span>
+
+      <!-- Running panel: shown once install starts -->
+      <div id="install-running-panel" style="display:none;flex-direction:column;gap:0;flex:1;overflow:hidden;padding:12px 12px 0;">
+        <div class="terminal-bar">
+          <div style="display:flex;align-items:center;gap:6px">
+            <span id="install-live-dot" class="terminal-live-dot" style="display:none"></span>
+            <span id="install-log-label" style="font-size:10px;color:var(--text2)">Install log</span>
+          </div>
+          <button class="clear-btn" onclick="document.getElementById('install-output').textContent=''">⊘ Clear</button>
+        </div>
+        <div class="terminal" id="install-output" style="flex:1;min-height:200px;border-top:none;border-radius:0 0 var(--radius) var(--radius);"></div>
+        <div class="install-status-bar" id="install-status-bar" style="margin-top:8px;border-radius:var(--radius);border:1px solid var(--border);margin-bottom:12px">
+          <span class="spinner" id="install-spinner" style="display:none"></span>
+          <span class="status-text" id="install-status-text">—</span>
+        </div>
       </div>
+
     </div>
     <div class="modal-footer">
-      <button class="btn" id="install-close-btn" onclick="closeModal('install-modal'); refreshAll()" style="margin-left:auto">Close &amp; Refresh</button>
+      <button class="btn" id="install-close-btn" onclick="closeModal('install-modal')" style="margin-right:auto">Cancel</button>
+      <button class="btn btn-success" id="install-start-btn" onclick="_doStartInstall()">↓ Start Install</button>
     </div>
   </div>
 </div>
@@ -1089,6 +1179,33 @@
     <div class="modal-footer">
       <button class="btn" onclick="closeModal('fix-path-modal')">Close</button>
       <button class="btn btn-primary" id="fix-path-apply-btn" style="display:none" onclick="runFixPath()">⚡ Apply</button>
+    </div>
+  </div>
+</div>
+
+<!-- Shutdown Modal -->
+<div class="modal-overlay" id="shutdown-modal">
+  <div class="modal" style="max-width:420px">
+    <div class="modal-header">
+      <div class="modal-title" style="color:var(--red)">⏻ Stop DevKit Server</div>
+      <button class="modal-close" onclick="closeModal('shutdown-modal')">×</button>
+    </div>
+    <div class="modal-body" id="shutdown-modal-body" style="padding:24px 20px;display:flex;flex-direction:column;gap:16px">
+      <p style="margin:0;font-size:13px;color:var(--text);line-height:1.6">
+        This will stop the DevKit server process and close all active installs.<br>
+        You will need to restart <code style="font-family:var(--font);font-size:11px;background:var(--bg3);padding:1px 5px;border-radius:3px">launch.sh</code> to use the UI again.
+      </p>
+      <div style="display:flex;align-items:center;gap:10px;padding:12px 14px;background:rgba(248,81,73,0.07);border:1px solid rgba(248,81,73,0.25);border-radius:6px;font-size:11px;color:var(--text2)">
+        <span style="font-size:16px">⚠</span>
+        Any running install or uninstall will be terminated immediately.
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeModal('shutdown-modal')" style="margin-right:auto">Cancel</button>
+      <button class="btn btn-danger" id="shutdown-confirm-btn" onclick="doShutdown()"
+              style="background:rgba(248,81,73,0.12);border-color:rgba(248,81,73,0.5);color:var(--red)">
+        ⏻ Stop Server
+      </button>
     </div>
   </div>
 </div>
@@ -1482,7 +1599,8 @@ bash launch.sh</div>
 
   function appendInstallLine(output, line) {
     const span = document.createElement('span');
-    span.className = 'terminal-line';
+    span.className = 'terminal-line new';
+    span.addEventListener('animationend', () => span.classList.remove('new'), { once: true });
     if (line.includes('[OK]') || line.includes('SUCCESS') || line.startsWith('✓') || line.includes('installed to')) span.classList.add('ok');
     else if (line.includes('[!!]') || line.includes('ERROR') || line.includes('FAIL') || line.startsWith('✗')) span.classList.add('err');
     else if (line.includes('[--]') || line.includes('Skipped') || line.includes('SKIP')) span.classList.add('warn');
@@ -1497,12 +1615,53 @@ bash launch.sh</div>
     }
   }
 
+  // Pending install state — set by installTool(), consumed by _doStartInstall()
+  let _pendingInstall = null;
+
   function installTool(toolId, toolName, rebuild) {
-    document.getElementById('install-modal-title').textContent = (rebuild ? 'Rebuilding: ' : 'Installing: ') + toolName;
+    _pendingInstall = { toolId, toolName, rebuild };
+
+    // Reset to confirm panel
+    document.getElementById('install-modal-title').textContent = (rebuild ? 'Rebuild: ' : 'Install: ') + toolName;
+    document.getElementById('install-confirm-panel').style.display = '';
+    const runPanel = document.getElementById('install-running-panel');
+    runPanel.style.display = 'none';
+    runPanel.style.flexDirection = '';
+
+    const startBtn = document.getElementById('install-start-btn');
+    startBtn.style.display = '';
+    startBtn.textContent = rebuild ? '↺ Start Rebuild' : '↓ Start Install';
+
+    const closeBtn = document.getElementById('install-close-btn');
+    closeBtn.textContent = 'Cancel';
+    closeBtn.onclick = () => closeModal('install-modal');
+
+    openModal('install-modal');
+  }
+
+  function _doStartInstall() {
+    if (!_pendingInstall) return;
+    const { toolId, toolName, rebuild } = _pendingInstall;
+    const updatePath = document.getElementById('install-path-consent').checked;
+
+    // Switch to running panel
+    document.getElementById('install-confirm-panel').style.display = 'none';
+    const runPanel = document.getElementById('install-running-panel');
+    runPanel.style.display = 'flex';
+    runPanel.style.flexDirection = 'column';
+
+    document.getElementById('install-start-btn').style.display = 'none';
+    const closeBtn = document.getElementById('install-close-btn');
+    closeBtn.textContent = 'Close & Refresh';
+    closeBtn.onclick = () => { closeModal('install-modal'); refreshAll(); };
+
     const output = document.getElementById('install-output');
     output.textContent = '';
+    const liveDot  = document.getElementById('install-live-dot');
+    const logLabel = document.getElementById('install-log-label');
+    if (liveDot)  liveDot.style.display = '';
+    if (logLabel) logLabel.textContent = 'Live — install in progress';
     setInstallStatus('Starting…', true);
-    openModal('install-modal');
 
     const logLines = [];
     const logStarted = new Date().toISOString();
@@ -1525,29 +1684,33 @@ bash launch.sh</div>
       const line = e.data;
       if (line.startsWith('DONE:')) {
         evtSource.close();
+        if (liveDot)  liveDot.style.display = 'none';
+        if (logLabel) logLabel.textContent = 'Install log';
         const success = line === 'DONE:success';
-        if (success) {
-          const consent = document.getElementById('install-path-consent');
-          if (consent && consent.checked) {
-            setInstallStatus('Updating PATH…', true);
-            const pathEvt = new EventSource('/fix-path');
-            pathEvt.onmessage = function(pe) {
-              if (pe.data.startsWith('DONE:')) {
-                pathEvt.close();
-                _saveLog('success');
-                setInstallStatus('✓ Complete', false);
-                showToast('✓ ' + toolName + ' installed', 'success');
-              } else {
-                logLines.push(pe.data);
-                appendInstallLine(output, pe.data);
-              }
-            };
-            pathEvt.onerror = () => { pathEvt.close(); _saveLog('success'); setInstallStatus('✓ Complete', false); showToast('✓ ' + toolName + ' installed', 'success'); };
-          } else {
+        if (success && updatePath) {
+          setInstallStatus('Updating PATH…', true);
+          const pathEvt = new EventSource(`/fix-path-tool/${toolId}`);
+          pathEvt.onmessage = function(pe) {
+            if (pe.data.startsWith('DONE:')) {
+              pathEvt.close();
+              _saveLog('success');
+              setInstallStatus('✓ Complete', false);
+              showToast('✓ ' + toolName + ' installed', 'success');
+            } else {
+              logLines.push(pe.data);
+              appendInstallLine(output, pe.data);
+            }
+          };
+          pathEvt.onerror = () => {
+            pathEvt.close();
             _saveLog('success');
             setInstallStatus('✓ Complete', false);
             showToast('✓ ' + toolName + ' installed', 'success');
-          }
+          };
+        } else if (success) {
+          _saveLog('success');
+          setInstallStatus('✓ Complete', false);
+          showToast('✓ ' + toolName + ' installed', 'success');
         } else {
           _saveLog('failed');
           setInstallStatus('✗ Failed', false);
@@ -1560,6 +1723,8 @@ bash launch.sh</div>
     };
     evtSource.onerror = function() {
       evtSource.close();
+      if (liveDot)  liveDot.style.display = 'none';
+      if (logLabel) logLabel.textContent = 'Install log';
       _saveLog('error');
       setInstallStatus('Connection closed', false);
     };
@@ -1588,8 +1753,12 @@ bash launch.sh</div>
     body.innerHTML = '<div style="color:var(--text2);font-size:12px;padding:20px 0;text-align:center">Loading…</div>';
     openModal('receipt-modal');
 
-    const resp = await fetch(`/api/tool/${toolId}`);
+    const [resp, probeResp] = await Promise.all([
+      fetch(`/api/tool/${toolId}`),
+      fetch(`/api/tool-probe/${toolId}`)
+    ]);
     const data = await resp.json();
+    const probe = probeResp.ok ? await probeResp.json() : null;
     const r = data.receipt;
 
     const platformLabel = data.platform === 'both' ? 'Windows + Linux' : data.platform === 'windows' ? 'Windows' : 'Linux';
@@ -1609,10 +1778,18 @@ bash launch.sh</div>
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px">
         <div class="info-card">
           <div class="info-label">Status</div>
-          <div class="info-value ${r.status === 'success' ? 'green' : ''}" style="${!r.receipt_exists ? 'color:var(--text2)' : ''}">
-            ${r.status === 'success' ? '✓ Installed' : r.receipt_exists ? '— Not installed' : '— Unknown'}
-          </div>
-          ${!r.receipt_exists ? `<div style="font-size:10px;color:var(--text2);margin-top:4px">No receipt found</div>` : ''}
+          ${(()=>{
+            if (r.status === 'success') {
+              return `<div class="info-value green">✓ Installed</div>
+                      <div style="font-size:10px;color:var(--text2);margin-top:4px">via devkit</div>`;
+            }
+            if (probe && probe.system_found) {
+              return `<div class="info-value" style="color:var(--yellow)">⚡ Pre-installed</div>
+                      <div style="font-size:10px;color:var(--text2);margin-top:4px">found on system</div>`;
+            }
+            return `<div class="info-value" style="color:var(--text2)">— Unknown</div>
+                    <div style="font-size:10px;color:var(--text2);margin-top:4px">No receipt found</div>`;
+          })()}
         </div>
         <div class="info-card">
           <div class="info-label">Version</div>
@@ -1641,6 +1818,17 @@ bash launch.sh</div>
         <span style="color:var(--text2);font-size:11px;margin-left:4px">Source:</span>
         ${sourceBadge}
       </div>
+
+      ${(probe && probe.system_found && r.status !== 'success') ? `
+      <div style="border:1px solid rgba(210,153,34,0.35);border-radius:6px;padding:12px 14px;background:rgba(210,153,34,0.06);margin-bottom:12px">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+          <span style="font-size:12px;font-weight:600;color:var(--yellow)">⚡ Pre-installed on this system</span>
+          ${probe.in_devkit_prefix ? `<span style="font-size:10px;padding:1px 6px;border-radius:3px;background:rgba(63,185,80,0.12);border:1px solid rgba(63,185,80,0.3);color:var(--green)">devkit prefix</span>` : `<span style="font-size:10px;padding:1px 6px;border-radius:3px;background:rgba(210,153,34,0.12);border:1px solid rgba(210,153,34,0.3);color:var(--yellow)">system PATH</span>`}
+        </div>
+        <div style="font-size:11px;color:var(--text2);margin-bottom:3px">Detected at:</div>
+        <div style="font-size:11px;font-family:monospace;color:var(--text);word-break:break-all;margin-bottom:8px">${probe.system_path}</div>
+        <div style="font-size:10px;color:var(--text2)">You can still install via devkit to manage this tool centrally and track it with a receipt.</div>
+      </div>` : ''}
 
       ${isUser ? `
       <div style="border-top:1px solid var(--border);padding-top:10px;margin-top:10px">
@@ -1714,13 +1902,17 @@ bash launch.sh</div>
         const _si = _log.status === 'success' ? '✓' : _log.status === 'failed' ? '✗' : '⚠';
         const _dt = new Date(_log.completedAt).toLocaleString();
         const _linesHtml = _log.lines.map(_logLineHtml).join('\n');
+        const _logId = 'last-install-log-' + data.id;
         body.innerHTML += `
         <div style="border-top:1px solid var(--border);padding-top:10px;margin-top:10px">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
             <div style="font-size:11px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:0.5px">Last Install Output</div>
-            <span style="font-size:10px;color:${_sc}">${_si} ${_log.status}&nbsp;&nbsp;·&nbsp;&nbsp;${_dt}</span>
+            <div style="display:flex;align-items:center;gap:10px">
+              <span style="font-size:10px;color:${_sc}">${_si} ${_log.status}&nbsp;&nbsp;·&nbsp;&nbsp;${_dt}</span>
+              <button class="clear-btn" onclick="localStorage.removeItem('install_log_${data.id}');this.closest('div[style*=border-top]').remove()">⊘ Clear</button>
+            </div>
           </div>
-          <div class="terminal" style="height:200px;font-size:11px;white-space:pre-wrap;overflow-y:auto">${_linesHtml}</div>
+          <div class="terminal" id="${_logId}" style="height:200px;font-size:11px;white-space:pre-wrap;overflow-y:auto">${_linesHtml}</div>
         </div>`;
       }
     } catch(e) {}
@@ -1831,14 +2023,21 @@ bash launch.sh</div>
       }
     }
 
-    // Check button
+    // Check button — kept for manual re-run
     const checkBtn = document.getElementById('receipt-check-btn');
     checkBtn.style.display = '';
+    checkBtn.textContent = '↺ Re-check';
     checkBtn.onclick = () => {
       const cmd = (data.check_cmd || '').trim();
       _showCheckPanel(data.id, cmd, true);
       if (!cmd) setTimeout(() => { const i = document.getElementById('check-cmd-input'); if(i) i.focus(); }, 0);
     };
+
+    // Auto-run check when modal opens if a check command is configured
+    const _autoCheckCmd = (data.check_cmd || '').trim();
+    if (_autoCheckCmd) {
+      _showCheckPanel(data.id, _autoCheckCmd, true);
+    }
 
     // Attach copy buttons to .terminal blocks that don't already have them
     initCopyButtons(body);
@@ -1892,9 +2091,15 @@ bash launch.sh</div>
                  style="flex:1;background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:4px;font-family:monospace;font-size:12px;outline:none">
           <button class="btn btn-primary" id="check-run-btn" style="white-space:nowrap">▷ Run</button>
         </div>
-        <div style="position:relative">
-          <div class="terminal" id="check-output" style="min-height:56px;display:none"></div>
-          <button id="check-copy-btn" style="display:none;position:absolute;top:6px;right:6px" class="copy-btn">⎘ Copy</button>
+        <div>
+          <div class="terminal-bar" id="check-output-bar" style="display:none">
+            <span style="font-size:10px;color:var(--text2)">Output</span>
+            <div style="display:flex;gap:4px">
+              <button class="clear-btn" id="check-clear-btn" onclick="document.getElementById('check-output').textContent='';document.getElementById('check-output').style.display='none';document.getElementById('check-output-bar').style.display='none';document.getElementById('check-copy-btn').style.display='none'">⊘ Clear</button>
+              <button id="check-copy-btn" style="display:none" class="copy-btn">⎘ Copy</button>
+            </div>
+          </div>
+          <div class="terminal" id="check-output" style="min-height:40px;max-height:160px;overflow-y:auto;display:none;border-radius:0 0 var(--radius) var(--radius);border-top:none"></div>
         </div>
       </div>`;
     body.appendChild(panel);
@@ -1918,8 +2123,10 @@ bash launch.sh</div>
     _stopCheck();
 
     const copyBtn = document.getElementById('check-copy-btn');
+    const outputBar = document.getElementById('check-output-bar');
     output.style.display = '';
     output.innerHTML = '';
+    if (outputBar) outputBar.style.display = '';
     if (copyBtn) copyBtn.style.display = 'none';
     runBtn.disabled = true;
     runBtn.textContent = '…';
@@ -1943,6 +2150,8 @@ bash launch.sh</div>
             });
           };
         }
+        const outputBar = document.getElementById('check-output-bar');
+        if (outputBar) outputBar.style.display = '';
         return;
       }
       const span = document.createElement('span');
@@ -2957,6 +3166,36 @@ bash launch.sh</div>
   function refreshAll() {
     window.location.reload();
   }
+
+  // ---------------------------------------------------------------------------
+  // Server shutdown
+  // ---------------------------------------------------------------------------
+  function confirmShutdown() {
+    openModal('shutdown-modal');
+  }
+
+  async function doShutdown() {
+    const btn = document.getElementById('shutdown-confirm-btn');
+    btn.disabled = true;
+    btn.textContent = 'Stopping…';
+    try {
+      await fetch('/shutdown', { method: 'POST', keepalive: true });
+    } catch(_) { /* server may close before response arrives */ }
+    // Replace page with a stopped notice
+    document.body.innerHTML = `
+      <div style="display:flex;height:100vh;align-items:center;justify-content:center;
+                  background:#0d1117;font-family:monospace;flex-direction:column;gap:16px">
+        <div style="font-size:28px">⏻</div>
+        <div style="font-size:16px;color:#f8f8f2">DevKit server stopped.</div>
+        <div style="font-size:12px;color:#8b949e">Run <code style="background:#161b22;padding:2px 8px;border-radius:4px">bash launch.sh</code> to restart.</div>
+      </div>`;
+  }
+
+  // When the browser tab/window is closed, send a shutdown beacon so the
+  // server doesn't linger as an orphan process.
+  window.addEventListener('beforeunload', () => {
+    navigator.sendBeacon('/shutdown');
+  });
 
   // ---------------------------------------------------------------------------
   // Toast

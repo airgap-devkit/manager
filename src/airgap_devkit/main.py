@@ -56,6 +56,35 @@ OS = _detect_os()
 _PREFIX_OVERRIDE_FILE = APP_DIR.parent / ".devkit-prefix"  # airgap-devkit-manager/.devkit-prefix
 
 
+def _win_local_appdata() -> str:
+    """Return the true Windows %LOCALAPPDATA% path even when MSYS2 has stripped it.
+
+    MSYS2 bash sets USERPROFILE and HOME to POSIX paths (/home/<user>) before
+    spawning Python, so os.environ["LOCALAPPDATA"] may be absent and
+    Path.home() may return a non-Windows path.  Fall back to the Windows
+    Shell API (SHGetFolderPathW) which is immune to MSYS2 environment mangling.
+    """
+    local = os.environ.get("LOCALAPPDATA", "")
+    # Accept only a proper Windows absolute path (drive letter + colon)
+    if local and len(local) > 1 and local[1] == ":":
+        return local
+    # Shell API fallback — always returns the real Windows path
+    try:
+        import ctypes
+        buf = ctypes.create_unicode_buffer(260)
+        # CSIDL_LOCAL_APPDATA = 0x001c  →  C:\Users\<user>\AppData\Local
+        ctypes.windll.shell32.SHGetFolderPathW(0, 0x001c, 0, 0, buf)
+        if buf.value and len(buf.value) > 1 and buf.value[1] == ":":
+            return buf.value
+    except Exception:
+        pass
+    # Last resort: derive from USERPROFILE if it looks like a Windows path
+    userprofile = os.environ.get("USERPROFILE", "")
+    if userprofile and len(userprofile) > 1 and userprofile[1] == ":":
+        return userprofile + "\\AppData\\Local"
+    return str(Path.home() / "AppData" / "Local")
+
+
 def _detect_prefix() -> Path:
     # 1. Persisted UI override
     if _PREFIX_OVERRIDE_FILE.exists():
@@ -67,8 +96,7 @@ def _detect_prefix() -> Path:
             pass
     # 2. Auto-detect
     if OS == "windows":
-        local = os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local"))
-        return Path(local) / "airgap-cpp-devkit"
+        return Path(_win_local_appdata()) / "airgap-cpp-devkit"
     if Path("/opt/airgap-cpp-devkit").exists():
         return Path("/opt/airgap-cpp-devkit")
     return Path.home() / ".local" / "share" / "airgap-cpp-devkit"
@@ -89,6 +117,42 @@ def _to_bash_path(p: Path) -> str:
     return str(p)
 
 
+def _find_bash() -> str:
+    """Return the path to the correct bash interpreter.
+
+    On Windows, WSL bash (C:\\Windows\\System32\\bash.exe) is often found before
+    Git Bash on the PATH and runs scripts in a Linux environment, breaking all
+    Windows platform detection.  Walk PATH explicitly and skip System32.
+    """
+    if OS != "windows":
+        return "bash"
+    path_sep = ";"
+    for d in os.environ.get("PATH", "").split(path_sep):
+        d = d.strip()
+        if not d:
+            continue
+        if "system32" in d.lower():
+            continue
+        for name in ("bash.exe", "bash"):
+            candidate = Path(d) / name
+            try:
+                if candidate.is_file():
+                    return str(candidate)
+            except OSError:
+                continue
+    # Hardcoded fallbacks for standard Git for Windows installations
+    for loc in (
+        r"C:\Program Files\Git\bin\bash.exe",
+        r"C:\Program Files\Git\usr\bin\bash.exe",
+    ):
+        if Path(loc).exists():
+            return loc
+    return "bash"
+
+
+BASH_EXE = _find_bash()
+
+
 def _to_posix_bash_path(p: Path) -> str:
     """Convert a Windows absolute path to POSIX form for use inside a bash command string.
     E.g. C:\\Users\\foo\\bar -> /c/Users/foo/bar  (needed for inline PATH= assignments in bash -c)."""
@@ -96,6 +160,25 @@ def _to_posix_bash_path(p: Path) -> str:
     if OS == "windows" and len(s) >= 2 and s[1] == ":":
         s = "/" + s[0].lower() + s[2:]
     return s
+
+
+def _install_env(tool: dict) -> dict:
+    """Build the subprocess environment for a setup script invocation.
+
+    Passes INSTALL_PREFIX as a native OS path (backslashes on Windows).
+    Env vars bypass MSYS2's argv path-conversion, so the script sees the
+    correct Windows path even in a Python-spawned subprocess where the
+    /c/ virtual filesystem mount is not accessible.
+    """
+    tool_prefix = _current_prefix() / tool["receipt_name"]
+    native_prefix = str(tool_prefix)  # backslash path on Windows
+    return {
+        **os.environ,
+        "AIRGAP_OS": OS,
+        "INSTALL_PREFIX": native_prefix,
+        # install-mode.sh reads INSTALL_PREFIX_OVERRIDE for the same purpose
+        "INSTALL_PREFIX_OVERRIDE": native_prefix,
+    }
 
 
 def _detect_privilege() -> str:
@@ -189,6 +272,15 @@ def _load_tools() -> list:
             if not tool_id or tool_id in seen_ids:
                 continue
             seen_ids.add(tool_id)
+            # Resolve setup path relative to the devkit.json directory so tool
+            # authors can write "setup": "setup.sh" without knowing the repo layout.
+            setup_val = data.get("setup", "")
+            if setup_val:
+                abs_setup = (Path(manifest_path).parent / setup_val).resolve()
+                try:
+                    data["setup"] = str(abs_setup.relative_to(REPO_ROOT.resolve())).replace("\\", "/")
+                except ValueError:
+                    pass  # outside repo root — leave as-is
             # Source is determined by scan location, not the manifest contents
             data["source"] = source
             # Apply defaults so templates never see missing keys
@@ -320,22 +412,41 @@ def _parse_receipt(path: Path) -> dict:
     data["receipt_exists"] = True
     try:
         content = path.read_text(encoding="utf-8", errors="replace")
-        for line in content.splitlines():
-            line = line.strip()
-            if line.startswith("Version"):
-                data["version"] = line.split(":", 1)[-1].strip()
-            elif line.startswith("Status"):
-                data["status"] = line.split(":", 1)[-1].strip()
-            elif line.startswith("Date"):
-                data["date"] = _normalise_date(line.split(":", 1)[-1].strip())
-            elif line.startswith("Install path"):
-                data["install_path"] = line.split(":", 1)[-1].strip()
-            elif line.startswith("User"):
-                data["user"] = line.split(":", 1)[-1].strip()
-            elif line.startswith("Hostname"):
-                data["hostname"] = line.split(":", 1)[-1].strip()
-            elif line.startswith("Log file"):
-                data["log_file"] = line.split(":", 1)[-1].strip()
+        _has_installed_at = False
+        for raw in content.splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#"):
+                continue
+            # Support both "Key: value" (new) and "key=value" (legacy setup.sh) formats
+            colon = line.find(":")
+            eq = line.find("=")
+            if colon != -1 and (eq == -1 or colon < eq):
+                key, val = line[:colon].strip(), line[colon + 1:].strip()
+            elif eq != -1:
+                key, val = line[:eq].strip(), line[eq + 1:].strip()
+            else:
+                continue
+            k = key.lower().replace(" ", "_").replace("-", "_")
+            if k == "version":
+                data["version"] = val
+            elif k == "status":
+                data["status"] = val
+            elif k == "date":
+                data["date"] = _normalise_date(val)
+            elif k == "installed_at":
+                data["date"] = _normalise_date(val)
+                _has_installed_at = True
+            elif k in ("install_path", "install_prefix"):
+                data["install_path"] = val
+            elif k == "user":
+                data["user"] = val
+            elif k == "hostname":
+                data["hostname"] = val
+            elif k in ("log_file", "log"):
+                data["log_file"] = val
+        # setup.sh scripts write installed_at but no status — treat presence as success
+        if data["status"] == "not_installed" and _has_installed_at:
+            data["status"] = "success"
     except Exception:
         pass
     return data
@@ -396,6 +507,25 @@ def _get_receipt_path(receipt_name: str) -> Path:
     return tool_dir / _RECEIPT_FILENAME_LEGACY
 
 
+def _probe_system_exe(tool: dict) -> tuple:
+    """Return (sys_found, sys_path, sys_in_devkit) via shutil.which — no subprocess."""
+    check_cmd = (tool.get("check_cmd") or "").strip()
+    exe_name = check_cmd.split()[0] if check_cmd else ""
+    if not exe_name:
+        return False, None, False
+    prefix = _current_prefix()
+    suffixes = [".exe", ".EXE", ""] if OS == "windows" else [""]
+    for suf in suffixes:
+        found = shutil.which(exe_name + suf)
+        if found:
+            try:
+                in_devkit = Path(found).resolve().is_relative_to(prefix.resolve())
+            except (AttributeError, ValueError, OSError):
+                in_devkit = str(prefix).lower() in found.lower()
+            return True, found, in_devkit
+    return False, None, False
+
+
 def get_tool_status(tool: dict) -> dict:
     receipt_path = _get_receipt_path(tool["receipt_name"])
     receipt = _parse_receipt(receipt_path)
@@ -404,6 +534,7 @@ def get_tool_status(tool: dict) -> dict:
     available = tool["platform"] == "both" or tool["platform"] == OS
     setup_rel = tool.get("setup", "")
     uploaded_at_raw = tool.get("uploaded_at", "")
+    sys_found, sys_path, sys_in_devkit = _probe_system_exe(tool)
     return {
         **tool,
         "installed": installed,
@@ -413,6 +544,9 @@ def get_tool_status(tool: dict) -> dict:
         "setup_abs": str(REPO_ROOT / setup_rel) if setup_rel else "",
         "manifest": _load_manifest(tool),
         "uploaded_at_display": _normalise_date(uploaded_at_raw) if uploaded_at_raw else "",
+        "sys_found": sys_found,
+        "sys_path": sys_path or "",
+        "sys_in_devkit": sys_in_devkit,
     }
 
 
@@ -425,11 +559,59 @@ def get_all_tools_status() -> list:
 # ---------------------------------------------------------------------------
 _config = DevkitConfig.load()
 
+# ---------------------------------------------------------------------------
+# Process registry — all active child processes tracked here so they can be
+# killed on Ctrl+C, /shutdown, or browser-window-close.
+# ---------------------------------------------------------------------------
+_running_procs: set = set()
+
+
+def _kill_all_procs() -> None:
+    """Forcefully kill every tracked child process."""
+    for proc in list(_running_procs):
+        try:
+            if proc.returncode is None:
+                proc.kill()
+        except Exception:
+            pass
+    _running_procs.clear()
+
+
+async def _spawn(*args, **kwargs) -> asyncio.subprocess.Process:
+    """Create a subprocess and register it in _running_procs."""
+    proc = await asyncio.create_subprocess_exec(*args, **kwargs)
+    _running_procs.add(proc)
+    return proc
+
+
+async def _reap(proc: asyncio.subprocess.Process) -> int:
+    """Wait for a registered process to finish and remove it from the registry."""
+    try:
+        await proc.wait()
+    finally:
+        _running_procs.discard(proc)
+    return proc.returncode
+
+
+def _make_exception_handler(loop):
+    def _handler(loop, context):
+        exc = context.get("exception")
+        if isinstance(exc, ConnectionResetError):
+            return
+        loop.default_exception_handler(context)
+    return _handler
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    loop = asyncio.get_event_loop()
+    loop.set_exception_handler(_make_exception_handler(loop))
     app.state.mode = detect_mode()
-    yield
+    try:
+        yield
+    finally:
+        # Kill all child processes when the server shuts down (Ctrl+C, SIGTERM, /shutdown)
+        _kill_all_procs()
 
 
 # ---------------------------------------------------------------------------
@@ -526,8 +708,9 @@ async def init_submodule():
             "git", "-C", str(REPO_ROOT),
             "submodule", "update", "--init", "--recursive", "prebuilt",
         ]
+        proc = None
         try:
-            proc = await asyncio.create_subprocess_exec(
+            proc = await _spawn(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
@@ -536,13 +719,18 @@ async def init_submodule():
                 text = line.decode("utf-8", errors="replace").rstrip()
                 if text:
                     yield f"data: {text}\n\n"
-            await proc.wait()
-            if proc.returncode == 0:
+            rc = await _reap(proc)
+            if rc == 0:
                 yield "data: ✓ prebuilt initialised successfully\n\n"
                 yield "data: DONE:success\n\n"
             else:
-                yield f"data: ✗ git exited with code {proc.returncode}\n\n"
+                yield f"data: ✗ git exited with code {rc}\n\n"
                 yield "data: DONE:failed\n\n"
+        except asyncio.CancelledError:
+            if proc and proc.returncode is None:
+                proc.kill()
+            _running_procs.discard(proc)
+            raise
         except Exception as e:
             yield f"data: ERROR: {e}\n\n"
             yield "data: DONE:failed\n\n"
@@ -555,11 +743,12 @@ async def run_tests(verbose: bool = False):
     """Stream output of tests/run-tests.sh."""
     async def stream():
         yield "data: Running smoke tests...\n\n"
-        cmd = ["bash", "tests/run-tests.sh", "--os", OS, "--prefix", _to_bash_path(_current_prefix())]
+        cmd = [BASH_EXE, "tests/run-tests.sh", "--os", OS, "--prefix", _to_bash_path(_current_prefix())]
         if verbose:
             cmd.append("--verbose")
+        proc = None
         try:
-            proc = await asyncio.create_subprocess_exec(
+            proc = await _spawn(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
@@ -569,11 +758,13 @@ async def run_tests(verbose: bool = False):
                 text = line.decode("utf-8", errors="replace").rstrip()
                 if text:
                     yield f"data: {text}\n\n"
-            await proc.wait()
-            if proc.returncode == 0:
-                yield "data: DONE:success\n\n"
-            else:
-                yield "data: DONE:failed\n\n"
+            rc = await _reap(proc)
+            yield "data: DONE:success\n\n" if rc == 0 else "data: DONE:failed\n\n"
+        except asyncio.CancelledError:
+            if proc and proc.returncode is None:
+                proc.kill()
+            _running_procs.discard(proc)
+            raise
         except Exception as e:
             yield f"data: ERROR: {e}\n\n"
             yield "data: DONE:failed\n\n"
@@ -600,31 +791,37 @@ async def install_tool(tool_id: str, rebuild: bool = False):
     if not tool:
         return JSONResponse({"error": "Tool not found"}, status_code=404)
 
-    setup_script = REPO_ROOT / tool["setup"]
-
     async def stream():
         yield f"data: Installing {tool['name']} {tool['version']}...\n\n"
-        cmd = ["bash", _to_bash_path(setup_script)] + tool.get("setup_args", [])
+        cmd = [BASH_EXE, tool["setup"]] + tool.get("setup_args", [])
         if rebuild:
             cmd.append("--rebuild")
+        _env = _install_env(tool)
+        proc = None
         try:
-            proc = await asyncio.create_subprocess_exec(
+            proc = await _spawn(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
-                cwd=_to_bash_path(REPO_ROOT),
+                cwd=str(REPO_ROOT),
+                env=_env,
             )
             async for line in proc.stdout:
                 text = line.decode("utf-8", errors="replace").rstrip()
                 if text:
                     yield f"data: {text}\n\n"
-            await proc.wait()
-            if proc.returncode == 0:
+            rc = await _reap(proc)
+            if rc == 0:
                 yield "data: ✓ Installation complete\n\n"
                 yield "data: DONE:success\n\n"
             else:
-                yield f"data: ✗ Installation failed (exit {proc.returncode})\n\n"
+                yield f"data: ✗ Installation failed (exit {rc})\n\n"
                 yield "data: DONE:failed\n\n"
+        except asyncio.CancelledError:
+            if proc and proc.returncode is None:
+                proc.kill()
+            _running_procs.discard(proc)
+            raise
         except Exception as e:
             yield f"data: ERROR: {e}\n\n"
             yield "data: DONE:failed\n\n"
@@ -650,24 +847,30 @@ async def install_profile(profile_id: str, rebuild: bool = False):
         for tool in tools_to_install:
             yield f"data: \n\n"
             yield f"data: ── {tool['name']} {tool['version']}\n\n"
-            setup_script = REPO_ROOT / tool["setup"]
-            cmd = ["bash", _to_bash_path(setup_script)] + tool.get("setup_args", [])
+            cmd = [BASH_EXE, tool["setup"]] + tool.get("setup_args", [])
             if rebuild:
                 cmd.append("--rebuild")
+            _env = _install_env(tool)
+            proc = None
             try:
-                proc = await asyncio.create_subprocess_exec(
+                proc = await _spawn(
                     *cmd,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.STDOUT,
-                    cwd=_to_bash_path(REPO_ROOT),
+                    cwd=str(REPO_ROOT),
+                    env=_env,
                 )
                 async for line in proc.stdout:
                     text = line.decode("utf-8", errors="replace").rstrip()
                     if text:
                         yield f"data: {text}\n\n"
-                await proc.wait()
-                status = "✓" if proc.returncode == 0 else "✗"
-                yield f"data: {status} {tool['name']} done\n\n"
+                rc = await _reap(proc)
+                yield f"data: {'✓' if rc == 0 else '✗'} {tool['name']} done\n\n"
+            except asyncio.CancelledError:
+                if proc and proc.returncode is None:
+                    proc.kill()
+                _running_procs.discard(proc)
+                raise
             except Exception as e:
                 yield f"data: ERROR: {e}\n\n"
         yield "data: \n\n"
@@ -1086,6 +1289,7 @@ async def check_tool(tool_id: str, cmd: Optional[str] = None):
             return None
 
         yield f"data: $ {run_cmd}\n\n"
+        proc = None
         try:
             if is_simple:
                 import shlex as _shlex
@@ -1098,7 +1302,7 @@ async def check_tool(tool_id: str, cmd: Optional[str] = None):
                     import shutil as _shutil_w
                     sys_path = _shutil_w.which(parts[0]) if parts else None
                     yield f"data: # not in devkit prefix — using PATH: {sys_path or parts[0]}\n\n"
-                proc = await asyncio.create_subprocess_exec(
+                proc = await _spawn(
                     *exec_argv,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.STDOUT,
@@ -1111,8 +1315,8 @@ async def check_tool(tool_id: str, cmd: Optional[str] = None):
                 if extras:
                     sep = ";" if OS == "windows" else ":"
                     env["PATH"] = sep.join(extras) + sep + env.get("PATH", "")
-                proc = await asyncio.create_subprocess_exec(
-                    "bash", "-c", run_cmd,
+                proc = await _spawn(
+                    BASH_EXE, "-c", run_cmd,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.STDOUT,
                     cwd=_to_bash_path(REPO_ROOT),
@@ -1122,17 +1326,66 @@ async def check_tool(tool_id: str, cmd: Optional[str] = None):
                 text = line.decode("utf-8", errors="replace").rstrip()
                 if text:
                     yield f"data: {text}\n\n"
-            await proc.wait()
-            if proc.returncode == 0:
+            rc = await _reap(proc)
+            if rc == 0:
                 yield "data: DONE:success\n\n"
             else:
-                yield f"data: ✗ exit {proc.returncode}\n\n"
+                yield f"data: ✗ exit {rc}\n\n"
                 yield "data: DONE:failed\n\n"
+        except asyncio.CancelledError:
+            if proc and proc.returncode is None:
+                proc.kill()
+            _running_procs.discard(proc)
+            raise
         except Exception as e:
             yield f"data: ERROR: {e}\n\n"
             yield "data: DONE:failed\n\n"
 
     return StreamingResponse(stream(), media_type="text/event-stream")
+
+
+@app.get("/api/tool-probe/{tool_id:path}")
+async def tool_probe(tool_id: str):
+    """Fast non-subprocess probe: receipt status + shutil.which detection."""
+    import shutil as _shutil_probe
+
+    tool = next((t for t in TOOLS if t["id"] == tool_id), None)
+    if not tool:
+        return JSONResponse({"error": "Tool not found"}, status_code=404)
+
+    check_cmd = (tool.get("check_cmd") or "").strip()
+    exe_name = check_cmd.split()[0] if check_cmd else ""
+
+    receipt_name = tool.get("receipt_name", tool_id)
+    receipt_path = _get_receipt_path(receipt_name)
+    receipt = _parse_receipt(receipt_path)
+    devkit_installed = receipt["status"] == "success"
+
+    prefix = _current_prefix()
+    system_path: Optional[str] = None
+    system_found = False
+    in_devkit_prefix = False
+
+    if exe_name:
+        suffixes = [".exe", ".EXE", ""] if OS == "windows" else [""]
+        for suf in suffixes:
+            found = _shutil_probe.which(exe_name + suf)
+            if found:
+                system_found = True
+                system_path = found
+                try:
+                    in_devkit_prefix = Path(found).resolve().is_relative_to(prefix.resolve())
+                except (AttributeError, ValueError, OSError):
+                    in_devkit_prefix = str(prefix).lower() in found.lower()
+                break
+
+    return JSONResponse({
+        "devkit_installed": devkit_installed,
+        "system_found": system_found,
+        "system_path": system_path,
+        "in_devkit_prefix": in_devkit_prefix,
+        "exe_name": exe_name,
+    })
 
 
 @app.delete("/packages/staging/{staging_id}")
@@ -1290,8 +1543,9 @@ async def subpkg_install_stream(tool_id: str, pkg_id: str, uninstall: bool = Fal
             yield "data: DONE:failed\n\n"
             return
 
+        proc = None
         try:
-            proc = await asyncio.create_subprocess_exec(
+            proc = await _spawn(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
@@ -1301,13 +1555,18 @@ async def subpkg_install_stream(tool_id: str, pkg_id: str, uninstall: bool = Fal
                 text = line.decode("utf-8", errors="replace").rstrip()
                 if text:
                     yield f"data: {text}\n\n"
-            await proc.wait()
-            if proc.returncode == 0:
+            rc = await _reap(proc)
+            if rc == 0:
                 yield f"data: ✓ {pkg_id} {'removed' if uninstall else 'installed'}\n\n"
                 yield "data: DONE:success\n\n"
             else:
-                yield f"data: ✗ Failed (exit {proc.returncode})\n\n"
+                yield f"data: ✗ Failed (exit {rc})\n\n"
                 yield "data: DONE:failed\n\n"
+        except asyncio.CancelledError:
+            if proc and proc.returncode is None:
+                proc.kill()
+            _running_procs.discard(proc)
+            raise
         except FileNotFoundError as exc:
             yield f"data: ✗ Command not found: {exc}\n\n"
             yield "data: DONE:failed\n\n"
@@ -1338,6 +1597,17 @@ async def open_file(path: str):
 @app.get("/health")
 async def health():
     return {"status": "ok", "os": OS, "prefix": str(_current_prefix())}
+
+
+@app.post("/shutdown")
+async def shutdown():
+    """Gracefully stop the server — kill child processes then exit."""
+    async def _stop():
+        await asyncio.sleep(0.25)   # let the HTTP response flush
+        _kill_all_procs()
+        os._exit(0)
+    asyncio.create_task(_stop())
+    return JSONResponse({"ok": True})
 
 
 # ---------------------------------------------------------------------------
@@ -1468,8 +1738,9 @@ async def updates_pip(pkg: Optional[str] = None, all: bool = False):
             yield f"data: Upgrading {pkg}...\n\n"
 
         cmd = [python, "-m", "pip", "install", "--upgrade"] + packages
+        proc = None
         try:
-            proc = await asyncio.create_subprocess_exec(
+            proc = await _spawn(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
@@ -1478,13 +1749,18 @@ async def updates_pip(pkg: Optional[str] = None, all: bool = False):
                 text = line.decode("utf-8", errors="replace").rstrip()
                 if text:
                     yield f"data: {text}\n\n"
-            await proc.wait()
-            if proc.returncode == 0:
+            rc = await _reap(proc)
+            if rc == 0:
                 yield "data: ✓ Upgrade complete\n\n"
                 yield "data: DONE:success\n\n"
             else:
-                yield f"data: ✗ pip exited with code {proc.returncode}\n\n"
+                yield f"data: ✗ pip exited with code {rc}\n\n"
                 yield "data: DONE:failed\n\n"
+        except asyncio.CancelledError:
+            if proc and proc.returncode is None:
+                proc.kill()
+            _running_procs.discard(proc)
+            raise
         except Exception as exc:
             yield f"data: ERROR: {exc}\n\n"
             yield "data: DONE:failed\n\n"
@@ -1615,6 +1891,100 @@ async def api_path_status():
     return {"entries": entries, "needs_fix": needs_fix,
             "os": OS, "prefix": str(_current_prefix()),
             "cmd_autorun_set": cmd_autorun_set}
+
+
+@app.get("/fix-path-tool/{tool_id:path}")
+async def fix_path_tool(tool_id: str):
+    """SSE: add only this tool's bin dir to the user PATH."""
+    tool = next((t for t in TOOLS if t["id"] == tool_id), None)
+    if not tool:
+        return JSONResponse({"error": "Tool not found"}, status_code=404)
+
+    async def stream():
+        prefix = _current_prefix()
+        receipt_name = tool.get("receipt_name", tool_id)
+        tool_dir = prefix / receipt_name
+        tool_bin = tool_dir / "bin"
+
+        bin_dir: Optional[Path] = None
+        for candidate in [tool_bin, tool_dir]:
+            if not candidate.exists():
+                continue
+            suffixes = {".exe"} if OS == "windows" else set()
+            try:
+                has_exe = any(
+                    f.is_file() and (not suffixes or f.suffix.lower() in suffixes)
+                    for f in candidate.iterdir()
+                )
+            except OSError:
+                continue
+            if has_exe:
+                bin_dir = candidate
+                break
+
+        if bin_dir is None:
+            yield f"data: ✗ No executable directory found for {tool['name']}\n\n"
+            yield "data: DONE:failed\n\n"
+            return
+
+        bin_str = str(bin_dir)
+
+        if OS == "windows":
+            try:
+                current = _read_user_path_win()
+            except Exception as exc:
+                yield f"data: ✗ Cannot read user PATH from registry: {exc}\n\n"
+                yield "data: DONE:failed\n\n"
+                return
+            path_parts = [p.strip() for p in current.split(";") if p.strip()]
+            bin_lower = bin_str.lower().rstrip("\\/")
+            if bin_lower in [p.lower().rstrip("\\/") for p in path_parts]:
+                yield f"data: ✓ Already on PATH: {bin_str}\n\n"
+                yield "data: DONE:success\n\n"
+                return
+            new_path = bin_str + (";" + current if current else "")
+            try:
+                _write_user_path_win(new_path)
+                yield f"data: ✓ Added to PATH: {bin_str}\n\n"
+                yield "data: ✓ Open a new terminal to pick up the change.\n\n"
+                yield "data: DONE:success\n\n"
+            except Exception as exc:
+                yield f"data: ✗ Failed to write registry: {exc}\n\n"
+                yield "data: DONE:failed\n\n"
+        else:
+            bashrc = Path.home() / ".bashrc"
+            marker_start = "# >>> airgap-devkit PATH >>>"
+            marker_end   = "# <<< airgap-devkit PATH <<<"
+            try:
+                existing = bashrc.read_text(encoding="utf-8") if bashrc.exists() else ""
+            except Exception as exc:
+                yield f"data: ✗ Cannot read ~/.bashrc: {exc}\n\n"
+                yield "data: DONE:failed\n\n"
+                return
+            export_line = f'export PATH="{bin_str}:$PATH"'
+            if bin_str in existing:
+                yield f"data: ✓ Already in ~/.bashrc: {bin_str}\n\n"
+                yield "data: DONE:success\n\n"
+                return
+            import re as _re
+            if marker_start in existing:
+                new_content = _re.sub(
+                    rf"({_re.escape(marker_start)})(.*?)({_re.escape(marker_end)})",
+                    rf"\1\2{export_line}\n\3",
+                    existing, flags=_re.DOTALL,
+                )
+            else:
+                new_content = existing.rstrip("\n") + f"\n{marker_start}\n{export_line}\n{marker_end}\n"
+            try:
+                bashrc.write_text(new_content, encoding="utf-8")
+                yield f"data: ✓ Added to ~/.bashrc: {bin_str}\n\n"
+                yield "data: ✓ Run: source ~/.bashrc  or open a new terminal.\n\n"
+                yield "data: DONE:success\n\n"
+            except Exception as exc:
+                yield f"data: ✗ Cannot write ~/.bashrc: {exc}\n\n"
+                yield "data: DONE:failed\n\n"
+
+    return StreamingResponse(stream(), media_type="text/event-stream")
 
 
 @app.get("/fix-path")
