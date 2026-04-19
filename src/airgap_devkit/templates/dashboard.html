@@ -425,6 +425,8 @@
       transition: color 0.15s, border-color 0.15s;
     }
     .clear-btn:hover { color: var(--yellow); border-color: rgba(210,153,34,0.4); }
+    /* Confirm panel spacing */
+    #install-confirm-panel .install-options-body { margin-top: 28px; }
     /* Confirm panel option card */
     .install-option-card {
       display: flex; align-items: flex-start; gap: 12px;
@@ -1105,21 +1107,23 @@
     <div class="modal-body" style="padding: 0; overflow: hidden; display: flex; flex-direction: column; gap: 0;">
 
       <!-- Confirm panel: shown before install starts -->
-      <div id="install-confirm-panel" style="padding:28px 20px 24px;display:flex;flex-direction:column;gap:20px;">
+      <div id="install-confirm-panel" style="padding:28px 20px 24px;">
         <div>
-          <div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:4px">Install Options</div>
+          <div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:6px">Install Options</div>
           <div style="font-size:11px;color:var(--text2)">Review and configure before the install begins.</div>
         </div>
-        <label class="install-option-card" for="install-path-consent">
-          <input type="checkbox" id="install-path-consent" checked>
-          <div style="display:flex;flex-direction:column;gap:3px;flex:1">
-            <div style="font-size:12px;font-weight:600;color:var(--text)">Add to PATH after installation</div>
-            <div style="font-size:11px;color:var(--text2);line-height:1.5">
-              Registers this tool's bin directory in your user PATH so it's available in every terminal.
-              <span style="color:var(--accent);margin-left:4px">Recommended.</span>
+        <div class="install-options-body">
+          <label class="install-option-card" for="install-path-consent">
+            <input type="checkbox" id="install-path-consent" checked>
+            <div style="display:flex;flex-direction:column;gap:3px;flex:1">
+              <div style="font-size:12px;font-weight:600;color:var(--text)">Add to PATH after installation</div>
+              <div style="font-size:11px;color:var(--text2);line-height:1.5">
+                Registers this tool's bin directory in your user PATH so it's available in every terminal.
+                <span style="color:var(--accent);margin-left:4px">Recommended.</span>
+              </div>
             </div>
-          </div>
-        </label>
+          </label>
+        </div>
       </div>
 
       <!-- Running panel: shown once install starts -->
@@ -1304,20 +1308,27 @@
       <!-- Step 1: file drop -->
       <div id="pkg-step1">
         <p style="color:var(--text2);font-size:13px;margin:0 0 14px">
-          Drop any <code style="color:var(--accent)">.zip</code> of your tool files.
-          The wizard generates <code style="color:var(--accent)">devkit.json</code>,
+          Drop any archive of your tool files. The wizard generates
+          <code style="color:var(--accent)">devkit.json</code>,
           <code style="color:var(--accent)">setup.sh</code>, and a checksum manifest automatically.
+          <span style="display:block;margin-top:5px;font-size:11px">
+            Supported: <code style="color:var(--accent)">.zip</code> ·
+            <code style="color:var(--accent)">.tar.xz</code> ·
+            <code style="color:var(--accent)">.tar.gz</code> ·
+            <code style="color:var(--accent)">.tar.bz2</code> ·
+            <code style="color:var(--accent)">.tgz</code>
+          </span>
         </p>
         <div class="upload-zone" id="upload-zone"
              onclick="document.getElementById('pkg-file').click()"
              ondragover="event.preventDefault();this.classList.add('dragover')"
              ondragleave="this.classList.remove('dragover')"
              ondrop="event.preventDefault();this.classList.remove('dragover');_handlePkgDrop(event)">
-          <input type="file" id="pkg-file" accept=".zip" onchange="_handlePkgSelect(event)">
+          <input type="file" id="pkg-file" accept=".zip,.tar.xz,.tar.gz,.tar.bz2,.tgz" onchange="_handlePkgSelect(event)">
           <div id="upload-zone-label">
             <div style="font-size:28px;margin-bottom:8px">📦</div>
-            <div style="font-size:13px;font-weight:600;color:var(--text)">Drop .zip here or click to browse</div>
-            <div style="font-size:11px;margin-top:4px;color:var(--text2)">Any zip — no special structure required</div>
+            <div style="font-size:13px;font-weight:600;color:var(--text)">Drop archive here or click to browse</div>
+            <div style="font-size:11px;margin-top:4px;color:var(--text2)">.zip · .tar.xz · .tar.gz · .tgz · .tar.bz2</div>
           </div>
         </div>
         <div id="upload-preflight-status" style="margin-top:10px;font-size:12px;display:none"></div>
@@ -1377,6 +1388,12 @@
             <span style="font-weight:400"> — e.g. ~30s, ~5min (optional)</span>
           </label>
           <input class="pkg-form-input" id="pkg-estimate" type="text" placeholder="~30s">
+        </div>
+        <div class="pkg-form-row">
+          <label class="pkg-form-label">Check command
+            <span style="font-weight:400"> — how to verify after install, e.g. <code>cmake --version</code> (optional)</span>
+          </label>
+          <input class="pkg-form-input" id="pkg-check-cmd" type="text" placeholder="e.g. filezilla --version" style="font-family:monospace">
         </div>
         <div id="pkg-finalize-status" style="margin-top:8px;font-size:12px;display:none"></div>
       </div>
@@ -1563,22 +1580,6 @@ bash launch.sh</div>
     document.getElementById(id).classList.remove('active');
     if (id === 'receipt-modal') _stopCheck();
   }
-  document.addEventListener('keydown', e => {
-    if (e.key === 'Escape') {
-      const wasReceiptOpen = document.getElementById('receipt-modal').classList.contains('active');
-      document.querySelectorAll('.modal-overlay.active').forEach(m => m.classList.remove('active'));
-      if (wasReceiptOpen) _stopCheck();
-    }
-  });
-  document.querySelectorAll('.modal-overlay').forEach(overlay => {
-    overlay.addEventListener('click', e => {
-      if (e.target === overlay) {
-        const wasReceiptOpen = overlay.id === 'receipt-modal';
-        overlay.classList.remove('active');
-        if (wasReceiptOpen) _stopCheck();
-      }
-    });
-  });
 
   // ---------------------------------------------------------------------------
   // Install tool
@@ -1753,13 +1754,30 @@ bash launch.sh</div>
     body.innerHTML = '<div style="color:var(--text2);font-size:12px;padding:20px 0;text-align:center">Loading…</div>';
     openModal('receipt-modal');
 
-    const [resp, probeResp] = await Promise.all([
-      fetch(`/api/tool/${toolId}`),
-      fetch(`/api/tool-probe/${toolId}`)
-    ]);
-    const data = await resp.json();
-    const probe = probeResp.ok ? await probeResp.json() : null;
-    const r = data.receipt;
+    let resp, probeResp;
+    try {
+      [resp, probeResp] = await Promise.all([
+        fetch(`/api/tool/${toolId}`),
+        fetch(`/api/tool-probe/${toolId}`)
+      ]);
+    } catch (fetchErr) {
+      body.innerHTML = `<div style="color:var(--red);padding:20px 0;text-align:center;font-size:12px">✗ Network error: ${fetchErr.message}</div>`;
+      return;
+    }
+    if (!resp.ok) {
+      const errData = await resp.json().catch(() => ({}));
+      body.innerHTML = `<div style="color:var(--red);padding:20px 0;text-align:center;font-size:12px">✗ ${errData.error || `Server error ${resp.status}`}</div>`;
+      return;
+    }
+    let data;
+    try {
+      data = await resp.json();
+    } catch (parseErr) {
+      body.innerHTML = `<div style="color:var(--red);padding:20px 0;text-align:center;font-size:12px">✗ Invalid response from server</div>`;
+      return;
+    }
+    const probe = probeResp.ok ? await probeResp.json().catch(() => null) : null;
+    const r = data.receipt || {};
 
     const platformLabel = data.platform === 'both' ? 'Windows + Linux' : data.platform === 'windows' ? 'Windows' : 'Linux';
     const prebuiltLabel = data.uses_prebuilt
@@ -1772,6 +1790,7 @@ bash launch.sh</div>
       ? `<span style="display:inline-flex;align-items:center;gap:4px;font-size:10px;padding:2px 7px;border-radius:4px;background:rgba(210,153,34,0.12);border:1px solid rgba(210,153,34,0.35);color:var(--yellow)">⬆ custom package</span>`
       : `<span style="display:inline-flex;align-items:center;gap:4px;font-size:10px;padding:2px 7px;border-radius:4px;background:rgba(88,166,255,0.08);border:1px solid rgba(88,166,255,0.25);color:var(--text2)">◈ built-in</span>`;
 
+    try {
     body.innerHTML = `
       <div style="font-size:12px;color:var(--text2);line-height:1.6;margin-bottom:12px">${data.description}</div>
 
@@ -1867,6 +1886,10 @@ bash launch.sh</div>
         </div>
       </div>
     `;
+    } catch (renderErr) {
+      body.innerHTML = `<div style="color:var(--red);padding:20px 0;text-align:center;font-size:12px">✗ Render error: ${renderErr.message}</div>`;
+      return;
+    }
 
     // Checksums section — only render when there is actual content
     if (data.manifest) {
@@ -1879,13 +1902,13 @@ bash launch.sh</div>
         if (hasZip) {
           mHtml += `<div style="margin-bottom:10px">
             <div style="color:var(--text2);font-size:11px;margin-bottom:4px">Package zip SHA256:</div>
-            <div class="terminal" style="min-height:auto;padding:8px 12px;word-break:break-all;font-size:10px">${m.zip_sha256}</div>
+            <div class="terminal" style="height:auto;min-height:0;padding:8px 12px;word-break:break-all;font-size:10px">${m.zip_sha256}</div>
           </div>`;
         }
         if (hasFiles) {
           mHtml += m.files.map(f => `<div style="margin-bottom:10px">
             <div style="color:var(--text2);font-size:11px;margin-bottom:4px">${f.path}</div>
-            <div class="terminal" style="min-height:auto;padding:8px 12px;word-break:break-all;font-size:10px">${f.sha256}</div>
+            <div class="terminal" style="height:auto;min-height:0;padding:8px 12px;word-break:break-all;font-size:10px">${f.sha256}</div>
           </div>`).join('');
         }
         mHtml += `</div>`;
@@ -1916,6 +1939,8 @@ bash launch.sh</div>
         </div>`;
       }
     } catch(e) {}
+
+    body.scrollTop = 0;
 
     // Footer buttons — Install / Uninstall / Remove (user packages only)
     const uninstallBtn = document.getElementById('receipt-uninstall-btn');
@@ -2029,14 +2054,17 @@ bash launch.sh</div>
     checkBtn.textContent = '↺ Re-check';
     checkBtn.onclick = () => {
       const cmd = (data.check_cmd || '').trim();
-      _showCheckPanel(data.id, cmd, true);
+      _showCheckPanel(data.id, cmd, true, isUser);
       if (!cmd) setTimeout(() => { const i = document.getElementById('check-cmd-input'); if(i) i.focus(); }, 0);
     };
 
     // Auto-run check when modal opens if a check command is configured
     const _autoCheckCmd = (data.check_cmd || '').trim();
     if (_autoCheckCmd) {
-      _showCheckPanel(data.id, _autoCheckCmd, true);
+      _showCheckPanel(data.id, _autoCheckCmd, true, isUser);
+    } else if (isUser) {
+      // For user packages with no check command, show the panel so they can set one
+      _showCheckPanel(data.id, '', false, true);
     }
 
     // Attach copy buttons to .terminal blocks that don't already have them
@@ -2074,7 +2102,7 @@ bash launch.sh</div>
     if (_checkEvtSource) { _checkEvtSource.close(); _checkEvtSource = null; }
   }
 
-  function _showCheckPanel(toolId, defaultCmd, autoRun) {
+  function _showCheckPanel(toolId, defaultCmd, autoRun, allowSave = false) {
     const body = document.getElementById('receipt-modal-body');
     const existing = document.getElementById('check-panel');
     if (existing) { existing.remove(); _stopCheck(); }
@@ -2082,6 +2110,9 @@ bash launch.sh</div>
     const panel = document.createElement('div');
     panel.id = 'check-panel';
     const safeCmd = (defaultCmd || '').replace(/"/g, '&quot;');
+    const saveBtn = allowSave
+      ? `<button class="btn" id="check-save-btn" style="white-space:nowrap" title="Save as default check command for this package">⬆ Save</button>`
+      : '';
     panel.innerHTML = `
       <div style="border-top:1px solid var(--border);padding-top:12px;margin-top:12px">
         <div style="font-size:11px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">Version / Status Check</div>
@@ -2090,6 +2121,7 @@ bash launch.sh</div>
                  placeholder="e.g. cmake --version"
                  style="flex:1;background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:4px;font-family:monospace;font-size:12px;outline:none">
           <button class="btn btn-primary" id="check-run-btn" style="white-space:nowrap">▷ Run</button>
+          ${saveBtn}
         </div>
         <div>
           <div class="terminal-bar" id="check-output-bar" style="display:none">
@@ -2109,6 +2141,35 @@ bash launch.sh</div>
     document.getElementById('check-cmd-input').addEventListener('keydown', e => {
       if (e.key === 'Enter') _runCheck(toolId);
     });
+    if (allowSave) {
+      document.getElementById('check-save-btn').addEventListener('click', async () => {
+        const saveEl = document.getElementById('check-save-btn');
+        const cmd = document.getElementById('check-cmd-input').value.trim();
+        saveEl.disabled = true;
+        saveEl.textContent = '…';
+        try {
+          const r = await fetch(`/api/tool/${toolId}/check-cmd`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ check_cmd: cmd }),
+          });
+          const d = await r.json();
+          if (r.ok && d.ok) {
+            saveEl.textContent = '✓ Saved';
+            saveEl.style.color = 'var(--green)';
+            setTimeout(() => { saveEl.textContent = '⬆ Save'; saveEl.style.color = ''; saveEl.disabled = false; }, 2000);
+          } else {
+            saveEl.textContent = '✗ Failed';
+            saveEl.style.color = 'var(--red)';
+            setTimeout(() => { saveEl.textContent = '⬆ Save'; saveEl.style.color = ''; saveEl.disabled = false; }, 2000);
+          }
+        } catch {
+          saveEl.textContent = '✗ Error';
+          saveEl.style.color = 'var(--red)';
+          setTimeout(() => { saveEl.textContent = '⬆ Save'; saveEl.style.color = ''; saveEl.disabled = false; }, 2000);
+        }
+      });
+    }
 
     if (autoRun) _runCheck(toolId);
   }
@@ -2518,8 +2579,8 @@ bash launch.sh</div>
         <div style="font-size:11px;margin-top:2px;color:var(--text2)">${(_pkgState.file.size/1024).toFixed(1)} KB — click to change</div>`;
     } else {
       label.innerHTML = `<div style="font-size:28px;margin-bottom:8px">📦</div>
-        <div style="font-size:13px;font-weight:600;color:var(--text)">Drop .zip here or click to browse</div>
-        <div style="font-size:11px;margin-top:4px;color:var(--text2)">Any zip — no special structure required</div>`;
+        <div style="font-size:13px;font-weight:600;color:var(--text)">Drop archive here or click to browse</div>
+        <div style="font-size:11px;margin-top:4px;color:var(--text2)">.zip · .tar.xz · .tar.gz · .tgz · .tar.bz2</div>`;
     }
   }
 
@@ -2527,7 +2588,7 @@ bash launch.sh</div>
     const status = document.getElementById('upload-preflight-status');
     status.style.display = 'block';
     status.style.color = 'var(--text2)';
-    status.textContent = 'Analysing zip…';
+    status.textContent = 'Analysing archive…';
 
     const fd = new FormData();
     fd.append('file', _pkgState.file);
@@ -2546,10 +2607,11 @@ bash launch.sh</div>
 
       // Pre-fill form from detected fields
       const d = data.detected || {};
-      if (d.name)        document.getElementById('pkg-name').value    = d.name;
-      if (d.version)     document.getElementById('pkg-version').value = d.version;
-      if (d.description) document.getElementById('pkg-desc').value    = d.description;
-      if (d.estimate)    document.getElementById('pkg-estimate').value = d.estimate;
+      if (d.name)        document.getElementById('pkg-name').value      = d.name;
+      if (d.version)     document.getElementById('pkg-version').value   = d.version;
+      if (d.description) document.getElementById('pkg-desc').value      = d.description;
+      if (d.estimate)    document.getElementById('pkg-estimate').value  = d.estimate;
+      if (d.check_cmd)   document.getElementById('pkg-check-cmd').value = d.check_cmd;
       if (d.category) {
         const sel = document.getElementById('pkg-category');
         for (const opt of sel.options) { if (opt.text === d.category) { sel.value = opt.value; break; } }
@@ -2611,13 +2673,14 @@ bash launch.sh</div>
   }
 
   async function _finalizePkg() {
-    const name     = document.getElementById('pkg-name').value.trim();
-    const id       = document.getElementById('pkg-id').value.trim();
-    const version  = document.getElementById('pkg-version').value.trim();
-    const desc     = document.getElementById('pkg-desc').value.trim();
-    const category = document.getElementById('pkg-category').value;
-    const platform = document.getElementById('pkg-platform').value;
-    const estimate = document.getElementById('pkg-estimate').value.trim();
+    const name      = document.getElementById('pkg-name').value.trim();
+    const id        = document.getElementById('pkg-id').value.trim();
+    const version   = document.getElementById('pkg-version').value.trim();
+    const desc      = document.getElementById('pkg-desc').value.trim();
+    const category  = document.getElementById('pkg-category').value;
+    const platform  = document.getElementById('pkg-platform').value;
+    const estimate  = document.getElementById('pkg-estimate').value.trim();
+    const check_cmd = document.getElementById('pkg-check-cmd').value.trim();
 
     const fStatus  = document.getElementById('pkg-finalize-status');
     const createBtn = document.getElementById('pkg-create-btn');
@@ -2643,6 +2706,7 @@ bash launch.sh</div>
           staging_id: _pkgState.stagingId,
           id, name, version, description: desc, category, platform,
           estimate: estimate || '',
+          check_cmd: check_cmd || '',
           file_hashes: _pkgState.fileHashes,
           zip_sha256: _pkgState.zipSha256,
         }),
@@ -2681,7 +2745,7 @@ bash launch.sh</div>
     if (id === 'upload-modal') {
       _pkgState = { file: null, stagingId: null, fileHashes: {}, zipSha256: '', hasSetupSh: false };
       document.getElementById('pkg-file').value = '';
-      ['pkg-name','pkg-version','pkg-desc','pkg-estimate'].forEach(i => document.getElementById(i).value = '');
+      ['pkg-name','pkg-version','pkg-desc','pkg-estimate','pkg-check-cmd'].forEach(i => document.getElementById(i).value = '');
       delete document.getElementById('pkg-id').dataset.manualEdit;
       document.getElementById('pkg-id').value = '';
       document.getElementById('pkg-finalize-status').style.display = 'none';

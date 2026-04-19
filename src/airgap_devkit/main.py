@@ -11,6 +11,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tarfile
 import zipfile
 import hashlib
 import time
@@ -292,6 +293,7 @@ def _load_tools() -> list:
             data.setdefault("version", "")
             data.setdefault("version_label", None)
             data.setdefault("check_cmd", None)
+            data.setdefault("receipt_name", tool_id)
             tools.append(data)
     tools.sort(key=lambda t: (t.get("sort_order", 99), t.get("category", ""), t.get("name", "")))
     return tools
@@ -782,7 +784,12 @@ async def api_tool(tool_id: str):
     tool = next((t for t in TOOLS if t["id"] == tool_id), None)
     if not tool:
         return JSONResponse({"error": "Tool not found"}, status_code=404)
-    return get_tool_status(tool)
+    try:
+        return get_tool_status(tool)
+    except Exception as exc:
+        import traceback
+        traceback.print_exc()
+        return JSONResponse({"error": f"Server error: {exc}"}, status_code=500)
 
 
 @app.get("/install/{tool_id:path}")
@@ -1010,19 +1017,13 @@ def _generate_setup_sh(dest: Path, tool_id: str, name: str, version: str) -> Non
         'REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"',
         "",
         'source "$REPO_ROOT/scripts/install-mode.sh"',
+        f'install_mode_init "{tool_id}" "{version}" "$@"',
         "",
-        'PREFIX="$DEFAULT_PREFIX"',
+        "set -x",
         "REBUILD=false",
+        'for _arg in "$@"; do [[ "$_arg" == "--rebuild" ]] && REBUILD=true; done',
         "",
-        "while [[ $# -gt 0 ]]; do",
-        "  case $1 in",
-        '    --prefix) PREFIX="$2"; shift 2 ;;',
-        "    --rebuild) REBUILD=true; shift ;;",
-        "    *) shift ;;",
-        "  esac",
-        "done",
-        "",
-        f'TOOL_DIR="$PREFIX/{tool_id}"',
+        'TOOL_DIR="$INSTALL_PREFIX"',
         'mkdir -p "$TOOL_DIR"',
         "",
     ]
@@ -1046,8 +1047,17 @@ def _generate_setup_sh(dest: Path, tool_id: str, name: str, version: str) -> Non
             "fi",
             "",
             f'echo "Running {exe_name} silently…"',
-            '# Run via cmd.exe so Windows UAC / installer APIs work correctly',
-            'cmd.exe /c "$(cygpath -w "$INSTALLER")" /S',
+            '# PowerShell Start-Process -Wait properly handles UAC elevation and waits for',
+            '# the full installer process tree to exit (unlike cmd.exe start /wait).',
+            '_INSTALLER_WIN="$(cygpath -w "$INSTALLER")"',
+            'INSTALL_RC=0',
+            'powershell.exe -NonInteractive -ExecutionPolicy Bypass -Command \\',
+            '  "\\$p = Start-Process -FilePath \'$_INSTALLER_WIN\' -ArgumentList \'/S\' -PassThru -Wait; exit \\$p.ExitCode" \\',
+            '  || INSTALL_RC=$?',
+            'if [[ $INSTALL_RC -ne 0 ]]; then',
+            f'  echo "⚠ Installer exited with code $INSTALL_RC — {exe_name} may still have installed correctly."',
+            '  echo "  Check Add/Remove Programs to confirm, then re-run if needed."',
+            'fi',
             "",
             "# If the installer places files in a known directory, copy or symlink them",
             "# into TOOL_DIR so this devkit can track them.",
@@ -1074,26 +1084,82 @@ def _generate_setup_sh(dest: Path, tool_id: str, name: str, version: str) -> Non
 # Package upload endpoints — 2-step guided wizard
 # ---------------------------------------------------------------------------
 
+_ACCEPTED_EXTS = (".zip", ".tar.xz", ".tar.gz", ".tar.bz2", ".tgz")
+
+
+def _archive_ext(filename: str) -> str:
+    """Return the matched archive extension, or empty string if not accepted."""
+    fn = filename.lower()
+    for ext in _ACCEPTED_EXTS:
+        if fn.endswith(ext):
+            return ext
+    return ""
+
+
+def _extract_archive(content: bytes, ext: str, dest: Path) -> None:
+    """Extract zip or tar.* archive bytes into dest directory.
+
+    Path-traversal safety is checked in the preflight validation pass before
+    this function is called, so we skip the redundant getmembers() scan here.
+    Removing it avoids a backward-seek on streaming LZMA decompressors which
+    can cause extraction to fail on second upload of the same archive.
+    """
+    dest.mkdir(parents=True, exist_ok=True)
+    if ext == ".zip":
+        with zipfile.ZipFile(io.BytesIO(content)) as zf:
+            zf.extractall(str(dest))
+    else:
+        mode_map = {".tar.xz": "r:xz", ".tar.gz": "r:gz", ".tgz": "r:gz", ".tar.bz2": "r:bz2"}
+        mode = mode_map.get(ext, "r:*")
+        with tarfile.open(fileobj=io.BytesIO(content), mode=mode) as tf:
+            # Use filter='data' on Python 3.12+ to silence the DeprecationWarning
+            # and apply safe extraction defaults; fall back gracefully on older Python.
+            try:
+                tf.extractall(str(dest), filter="data")
+            except TypeError:
+                tf.extractall(str(dest))
+
+
 @app.post("/packages/preflight")
 async def packages_preflight(file: UploadFile = File(...)):
-    """Step 1: Upload zip, analyse contents, return pre-fill hints for the metadata form."""
-    if not (file.filename or "").lower().endswith(".zip"):
-        return JSONResponse({"error": "Only .zip files are accepted"}, status_code=400)
+    """Step 1: Upload archive, analyse contents, return pre-fill hints for the metadata form."""
+    try:
+        return await _packages_preflight_inner(file)
+    except Exception as exc:
+        import traceback
+        traceback.print_exc()
+        return JSONResponse({"error": f"Unexpected server error: {exc}"}, status_code=500)
+
+
+async def _packages_preflight_inner(file: UploadFile):
+    fname = (file.filename or "").strip()
+    ext = _archive_ext(fname)
+    if not ext:
+        accepted = ", ".join(_ACCEPTED_EXTS)
+        return JSONResponse({"error": f"Unsupported file type. Accepted: {accepted}"}, status_code=400)
 
     content = await file.read()
     if len(content) > 200 * 1024 * 1024:
-        return JSONResponse({"error": "Zip must be under 200 MB"}, status_code=400)
+        return JSONResponse({"error": "Archive must be under 200 MB"}, status_code=400)
 
     try:
-        with zipfile.ZipFile(io.BytesIO(content)) as zf:
-            names = zf.namelist()
-    except zipfile.BadZipFile:
-        return JSONResponse({"error": "Invalid or corrupt zip file"}, status_code=400)
-
-    for name in names:
-        p = Path(name)
-        if p.is_absolute() or ".." in p.parts:
-            return JSONResponse({"error": f"Unsafe path in zip: {name}"}, status_code=400)
+        if ext == ".zip":
+            with zipfile.ZipFile(io.BytesIO(content)) as zf:
+                names = zf.namelist()
+            for name in names:
+                p = Path(name)
+                if p.is_absolute() or ".." in p.parts:
+                    return JSONResponse({"error": f"Unsafe path in archive: {name}"}, status_code=400)
+        else:
+            mode_map = {".tar.xz": "r:xz", ".tar.gz": "r:gz", ".tgz": "r:gz", ".tar.bz2": "r:bz2"}
+            with tarfile.open(fileobj=io.BytesIO(content), mode=mode_map.get(ext, "r:*")) as tf:
+                names = [m.name for m in tf.getmembers()]
+            for name in names:
+                p = Path(name)
+                if p.is_absolute() or ".." in p.parts:
+                    return JSONResponse({"error": f"Unsafe path in archive: {name}"}, status_code=400)
+    except (zipfile.BadZipFile, tarfile.TarError, ValueError) as exc:
+        return JSONResponse({"error": f"Invalid or corrupt archive: {exc}"}, status_code=400)
 
     _cleanup_staging()
 
@@ -1102,12 +1168,15 @@ async def packages_preflight(file: UploadFile = File(...)):
     staging_path.mkdir(parents=True, exist_ok=True)
 
     zip_sha256 = _sha256_bytes(content)
-    (staging_path / "upload.zip").write_bytes(content)
+    (staging_path / f"upload{ext}").write_bytes(content)
 
     # Extract to contents/
     contents_base = staging_path / "contents"
-    with zipfile.ZipFile(io.BytesIO(content)) as zf:
-        zf.extractall(str(contents_base))
+    try:
+        _extract_archive(content, ext, contents_base)
+    except Exception as exc:
+        shutil.rmtree(str(staging_path), ignore_errors=True)
+        return JSONResponse({"error": f"Failed to extract archive: {exc}"}, status_code=400)
 
     # Detect single top-level wrapper directory (common zip convention)
     top = [p for p in contents_base.iterdir()]
@@ -1129,11 +1198,21 @@ async def packages_preflight(file: UploadFile = File(...)):
     if devkit_path.exists():
         try:
             existing = json.loads(devkit_path.read_text(encoding="utf-8"))
-            for field in ("id", "name", "version", "description", "category", "platform", "estimate"):
+            for field in ("id", "name", "version", "description", "category", "platform", "estimate", "check_cmd"):
                 if existing.get(field):
                     detected[field] = existing[field]
         except Exception:
             pass
+
+    # Auto-suggest check_cmd from detected executables if not already set
+    if not detected.get("check_cmd"):
+        exes = [f for f in contents_root.rglob("*.exe") if f.is_file()]
+        if not exes:
+            # Linux: look for files with no extension that might be executables
+            exes = [f for f in contents_root.rglob("*") if f.is_file() and not f.suffix and f.name.islower()]
+        if exes:
+            exe_name = exes[0].stem  # e.g. "filezilla" from "FileZilla.exe"
+            detected["check_cmd"] = f"{exe_name} --version"
 
     return {
         "staging_id": staging_id,
@@ -1156,7 +1235,7 @@ async def packages_finalize(request: Request):
     staging_path = STAGING_DIR / raw_sid
     if not staging_path.exists():
         return JSONResponse(
-            {"error": "Upload session expired — please re-upload the zip file"},
+            {"error": "Upload session expired — please re-upload the archive"},
             status_code=400,
         )
 
@@ -1209,7 +1288,7 @@ async def packages_finalize(request: Request):
         "category": body["category"].strip(),
         "platform": body["platform"].strip(),
         "description": body["description"].strip(),
-        "setup": f"user-packages/{tool_id}/setup.sh",
+        "setup": "setup.sh",
         "receipt_name": tool_id,
         "uses_prebuilt": False,
         "uploaded_by": uploader,
@@ -1217,6 +1296,8 @@ async def packages_finalize(request: Request):
     }
     if body.get("estimate", "").strip():
         devkit["estimate"] = body["estimate"].strip()
+    if body.get("check_cmd", "").strip():
+        devkit["check_cmd"] = body["check_cmd"].strip()
     (dest / "devkit.json").write_text(
         json.dumps(devkit, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
     )
@@ -1240,6 +1321,37 @@ async def packages_finalize(request: Request):
 
     _reload_tools()
     return {"ok": True, "id": tool_id, "name": name}
+
+
+@app.patch("/api/tool/{tool_id:path}/check-cmd")
+async def update_check_cmd(tool_id: str, request: Request):
+    """Save or clear the check_cmd for a user-uploaded package."""
+    tool = next((t for t in TOOLS if t["id"] == tool_id), None)
+    if not tool:
+        return JSONResponse({"error": "Tool not found"}, status_code=404)
+    if tool.get("source") != "user":
+        return JSONResponse({"error": "Only user packages can be edited"}, status_code=403)
+
+    body = await request.json()
+    new_cmd = str(body.get("check_cmd", "")).strip()
+
+    setup_rel = tool.get("setup", "")
+    devkit_path = REPO_ROOT / Path(setup_rel).parent / "devkit.json"
+    if not devkit_path.exists():
+        return JSONResponse({"error": "devkit.json not found"}, status_code=404)
+
+    try:
+        data = json.loads(devkit_path.read_text(encoding="utf-8"))
+        if new_cmd:
+            data["check_cmd"] = new_cmd
+        else:
+            data.pop("check_cmd", None)
+        devkit_path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+    _reload_tools()
+    return {"ok": True, "check_cmd": new_cmd}
 
 
 @app.get("/check/{tool_id:path}")
@@ -1353,39 +1465,44 @@ async def tool_probe(tool_id: str):
     if not tool:
         return JSONResponse({"error": "Tool not found"}, status_code=404)
 
-    check_cmd = (tool.get("check_cmd") or "").strip()
-    exe_name = check_cmd.split()[0] if check_cmd else ""
+    try:
+        check_cmd = (tool.get("check_cmd") or "").strip()
+        exe_name = check_cmd.split()[0] if check_cmd else ""
 
-    receipt_name = tool.get("receipt_name", tool_id)
-    receipt_path = _get_receipt_path(receipt_name)
-    receipt = _parse_receipt(receipt_path)
-    devkit_installed = receipt["status"] == "success"
+        receipt_name = tool.get("receipt_name", tool_id)
+        receipt_path = _get_receipt_path(receipt_name)
+        receipt = _parse_receipt(receipt_path)
+        devkit_installed = receipt["status"] == "success"
 
-    prefix = _current_prefix()
-    system_path: Optional[str] = None
-    system_found = False
-    in_devkit_prefix = False
+        prefix = _current_prefix()
+        system_path: Optional[str] = None
+        system_found = False
+        in_devkit_prefix = False
 
-    if exe_name:
-        suffixes = [".exe", ".EXE", ""] if OS == "windows" else [""]
-        for suf in suffixes:
-            found = _shutil_probe.which(exe_name + suf)
-            if found:
-                system_found = True
-                system_path = found
-                try:
-                    in_devkit_prefix = Path(found).resolve().is_relative_to(prefix.resolve())
-                except (AttributeError, ValueError, OSError):
-                    in_devkit_prefix = str(prefix).lower() in found.lower()
-                break
+        if exe_name:
+            suffixes = [".exe", ".EXE", ""] if OS == "windows" else [""]
+            for suf in suffixes:
+                found = _shutil_probe.which(exe_name + suf)
+                if found:
+                    system_found = True
+                    system_path = found
+                    try:
+                        in_devkit_prefix = Path(found).resolve().is_relative_to(prefix.resolve())
+                    except (AttributeError, ValueError, OSError):
+                        in_devkit_prefix = str(prefix).lower() in found.lower()
+                    break
 
-    return JSONResponse({
-        "devkit_installed": devkit_installed,
-        "system_found": system_found,
-        "system_path": system_path,
-        "in_devkit_prefix": in_devkit_prefix,
-        "exe_name": exe_name,
-    })
+        return JSONResponse({
+            "devkit_installed": devkit_installed,
+            "system_found": system_found,
+            "system_path": system_path,
+            "in_devkit_prefix": in_devkit_prefix,
+            "exe_name": exe_name,
+        })
+    except Exception as exc:
+        import traceback
+        traceback.print_exc()
+        return JSONResponse({"error": f"Server error: {exc}"}, status_code=500)
 
 
 @app.delete("/packages/staging/{staging_id}")
@@ -1923,8 +2040,15 @@ async def fix_path_tool(tool_id: str):
                 break
 
         if bin_dir is None:
-            yield f"data: ✗ No executable directory found for {tool['name']}\n\n"
-            yield "data: DONE:failed\n\n"
+            # User-uploaded packages (GUI installers, etc.) often install to Program Files
+            # and don't place executables in the devkit prefix — skip PATH wiring silently.
+            if tool.get("source") == "user":
+                yield f"data: ℹ PATH registration skipped — {tool['name']} uses a system installer.\n\n"
+                yield f"data: ℹ If needed, add the install directory to PATH manually.\n\n"
+                yield "data: DONE:success\n\n"
+            else:
+                yield f"data: ✗ No executable directory found for {tool['name']}\n\n"
+                yield "data: DONE:failed\n\n"
             return
 
         bin_str = str(bin_dir)
